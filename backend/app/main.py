@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
 
 app = FastAPI(
     title="Volt Guard API",
@@ -7,10 +8,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS
+# Configure CORS with environment-aware settings
+# For production, set ALLOWED_ORIGINS environment variable
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080").split(",")
+
+# In development, allow all origins for easier testing
+if os.getenv("DEBUG", "False").lower() == "true":
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
