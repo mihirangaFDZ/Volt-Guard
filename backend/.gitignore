@@ -1,0 +1,55 @@
+# Backend Python files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Environment variables
+.env
+
+# Database
+*.db
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# ML Models
+models/*.h5
+models/*.pkl
+models/*.joblib
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
