@@ -27,8 +27,8 @@ void main() {
     await tester.pumpWidget(const VoltGuardApp());
     await tester.pumpAndSettle();
 
-    // Scroll to make features visible
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -500));
+    // Scroll to make features visible using widget finder
+    await tester.ensureVisible(find.text('Powerful Features'));
     await tester.pumpAndSettle();
 
     // Verify that feature titles are displayed
@@ -62,8 +62,8 @@ void main() {
     await tester.pumpWidget(const VoltGuardApp());
     await tester.pumpAndSettle();
 
-    // Scroll to make benefits visible
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1500));
+    // Scroll to make benefits visible using widget finder
+    await tester.ensureVisible(find.text('Why Choose Volt Guard?'));
     await tester.pumpAndSettle();
 
     // Verify that benefits are displayed
