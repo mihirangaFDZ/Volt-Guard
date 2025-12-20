@@ -87,21 +87,18 @@ class ProfilePage extends StatelessWidget {
               context,
               'Personal Information',
               Icons.person_outline,
-              () {},
             ),
             const SizedBox(height: 8),
             _buildMenuCard(
               context,
               'Notifications',
               Icons.notifications_outlined,
-              () {},
             ),
             const SizedBox(height: 8),
             _buildMenuCard(
               context,
               'Privacy & Security',
               Icons.security_outlined,
-              () {},
             ),
             const SizedBox(height: 24),
             // App Settings
@@ -116,21 +113,18 @@ class ProfilePage extends StatelessWidget {
               context,
               'Energy Goals',
               Icons.flag_outlined,
-              () {},
             ),
             const SizedBox(height: 8),
             _buildMenuCard(
               context,
               'Device Management',
               Icons.devices_outlined,
-              () {},
             ),
             const SizedBox(height: 8),
             _buildMenuCard(
               context,
               'Data & Storage',
               Icons.storage_outlined,
-              () {},
             ),
             const SizedBox(height: 24),
             // Support
@@ -145,14 +139,12 @@ class ProfilePage extends StatelessWidget {
               context,
               'Help Center',
               Icons.help_outline,
-              () {},
             ),
             const SizedBox(height: 8),
             _buildMenuCard(
               context,
               'About',
               Icons.info_outline,
-              () {},
             ),
             const SizedBox(height: 24),
             // Logout
@@ -217,7 +209,6 @@ class ProfilePage extends StatelessWidget {
     BuildContext context,
     String title,
     IconData icon,
-    VoidCallback onTap,
   ) {
     return Card(
       elevation: 1,

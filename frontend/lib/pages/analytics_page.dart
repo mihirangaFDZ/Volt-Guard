@@ -166,7 +166,9 @@ class AnalyticsPage extends StatelessWidget {
     return ChoiceChip(
       label: Text(label),
       selected: isSelected,
-      onSelected: (selected) {},
+      onSelected: (selected) {
+        // TODO: Implement time period filter functionality
+      },
     );
   }
 
