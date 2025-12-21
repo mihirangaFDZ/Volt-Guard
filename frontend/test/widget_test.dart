@@ -3,72 +3,38 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:volt_guard/main.dart';
 
 void main() {
-  testWidgets('Landing page displays hero section', (WidgetTester tester) async {
-    // Build the app and trigger a frame
+  testWidgets('Shows splash then dashboard', (WidgetTester tester) async {
     await tester.pumpWidget(const VoltGuardApp());
 
-    // Verify that the hero section content is displayed
-    expect(find.text('Smart Energy\nManagement System'), findsOneWidget);
-    expect(find.text('Monitor, analyze, and optimize your energy consumption\nwith AI-powered insights'), findsOneWidget);
-    expect(find.byIcon(Icons.bolt), findsWidgets);
+    expect(find.text('Volt Guard'), findsOneWidget);
+    expect(find.text('Loading your energy cockpit...'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 1600));
+    await tester.pump();
+    expect(find.text('Smart energy,\nready for you.'), findsOneWidget);
   });
 
-  testWidgets('Landing page has Get Started button', (WidgetTester tester) async {
-    // Build the app and trigger a frame
+  testWidgets('Bottom bar includes required destinations', (WidgetTester tester) async {
     await tester.pumpWidget(const VoltGuardApp());
+    await tester.pump(const Duration(milliseconds: 1600));
+    await tester.pump();
 
-    // Verify that the CTA buttons are present
-    expect(find.text('Get Started'), findsOneWidget);
-    expect(find.text('Learn More'), findsOneWidget);
+    expect(find.text('Dashboard'), findsOneWidget);
+    expect(find.text('Analytics'), findsOneWidget);
+    expect(find.text('Alerts'), findsOneWidget);
+    expect(find.text('Devices'), findsOneWidget);
+    expect(find.text('Insights'), findsOneWidget);
   });
 
-  testWidgets('Landing page displays feature cards', (WidgetTester tester) async {
-    // Build the app and trigger a frame
+  testWidgets('Navigates to analytics tab', (WidgetTester tester) async {
     await tester.pumpWidget(const VoltGuardApp());
+    await tester.pump(const Duration(milliseconds: 1600));
+    await tester.pump();
+
+    await tester.tap(find.text('Analytics'));
     await tester.pumpAndSettle();
 
-    // Scroll to make features visible using widget finder
-    await tester.ensureVisible(find.text('Powerful Features'));
-    await tester.pumpAndSettle();
-
-    // Verify that feature titles are displayed
-    expect(find.text('Real-time Monitoring'), findsOneWidget);
-    expect(find.text('AI-Powered Predictions'), findsOneWidget);
-    expect(find.text('Anomaly Detection'), findsOneWidget);
-    expect(find.text('Fault Detection'), findsOneWidget);
-  });
-
-  testWidgets('Landing page has correct app bar', (WidgetTester tester) async {
-    // Build the app and trigger a frame
-    await tester.pumpWidget(const VoltGuardApp());
-
-    // Verify that the app bar title is correct
-    expect(find.text('Volt Guard'), findsWidgets);
-  });
-
-  testWidgets('Landing page displays stats', (WidgetTester tester) async {
-    // Build the app and trigger a frame
-    await tester.pumpWidget(const VoltGuardApp());
-
-    // Verify that stats are displayed
-    expect(find.text('10K+'), findsOneWidget);
-    expect(find.text('Active Users'), findsOneWidget);
-    expect(find.text('25%'), findsOneWidget);
-    expect(find.text('Energy Saved'), findsOneWidget);
-  });
-
-  testWidgets('Landing page displays benefits section', (WidgetTester tester) async {
-    // Build the app and trigger a frame
-    await tester.pumpWidget(const VoltGuardApp());
-    await tester.pumpAndSettle();
-
-    // Scroll to make benefits visible using widget finder
-    await tester.ensureVisible(find.text('Why Choose Volt Guard?'));
-    await tester.pumpAndSettle();
-
-    // Verify that benefits are displayed
-    expect(find.text('Why Choose Volt Guard?'), findsOneWidget);
-    expect(find.text('Save Money'), findsOneWidget);
-    expect(find.text('Eco-Friendly'), findsOneWidget);
+    expect(find.text('Usage this week'), findsOneWidget);
+    expect(find.text('Predicted monthly spend'), findsOneWidget);
   });
 }
