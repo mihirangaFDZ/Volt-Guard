@@ -70,7 +70,7 @@ class _SplashScreenState extends State<SplashScreen> {
                   border: Border.all(color: Colors.white.withOpacity(0.12)),
                 ),
                 child: Image.asset(
-                  'assets/images/loading.png',
+                  'assets/images/splash.png',
                   width: 120,
                   height: 120,
                 ),
@@ -126,9 +126,9 @@ class _HomeShellState extends State<HomeShell> {
         backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
-        title: Row(
+        title: const Row(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             Icon(Icons.bolt, color: Color(0xFF00C853)),
             SizedBox(width: 8),
             Text(
