@@ -9,13 +9,15 @@ void main() {
     expect(find.text('Volt Guard'), findsOneWidget);
     expect(find.text('Loading your energy cockpit...'), findsOneWidget);
 
-    await tester.pump(const Duration(milliseconds: 2000));
+    await tester.pump(const Duration(milliseconds: 1600));
+    await tester.pump();
     expect(find.text('Smart energy,\nready for you.'), findsOneWidget);
   });
 
   testWidgets('Bottom bar includes required destinations', (WidgetTester tester) async {
     await tester.pumpWidget(const VoltGuardApp());
-    await tester.pump(const Duration(milliseconds: 2000));
+    await tester.pump(const Duration(milliseconds: 1600));
+    await tester.pump();
 
     expect(find.text('Dashboard'), findsOneWidget);
     expect(find.text('Analytics'), findsOneWidget);
@@ -26,7 +28,8 @@ void main() {
 
   testWidgets('Navigates to analytics tab', (WidgetTester tester) async {
     await tester.pumpWidget(const VoltGuardApp());
-    await tester.pump(const Duration(milliseconds: 2000));
+    await tester.pump(const Duration(milliseconds: 1600));
+    await tester.pump();
 
     await tester.tap(find.text('Analytics'));
     await tester.pumpAndSettle();
