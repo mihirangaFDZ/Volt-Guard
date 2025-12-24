@@ -1,5 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from routes import devices, energy, prediction, anomalies, user_routes
+from routes.auth_routes import router as auth_router
+
+
 import os
 
 app = FastAPI(
@@ -38,9 +42,10 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
 
-# Import routers (to be added)
-# from app.api import energy, devices, predictions, anomalies
-# app.include_router(energy.router, prefix="/api/v1/energy", tags=["energy"])
-# app.include_router(devices.router, prefix="/api/v1/devices", tags=["devices"])
-# app.include_router(predictions.router, prefix="/api/v1/predictions", tags=["predictions"])
-# app.include_router(anomalies.router, prefix="/api/v1/anomalies", tags=["anomalies"])
+
+app.include_router(auth_router)
+app.include_router(devices.router, prefix="/devices")
+app.include_router(energy.router, prefix="/energy")
+app.include_router(prediction.router, prefix="/prediction")
+app.include_router(anomalies.router, prefix="/anomalies")
+app.include_router(user_routes.router, prefix="/users")
