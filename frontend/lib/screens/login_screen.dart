@@ -48,8 +48,8 @@ class _LoginScreenState extends State<LoginScreen>
         _isLoading = true;
       });
 
-      final asuthService = AuthService();
-      final result = await asuthService.login(
+      final authService = AuthService();
+      final result = await authService.login(
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );

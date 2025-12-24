@@ -20,7 +20,8 @@ class ApiConfig {
   static const String predictionsEndpoint = '/predictions';
   static const String anomaliesEndpoint = '/anomalies';
   static const String userEndpoint = '/users';
-  static const String authEndpoint = '/auth/login';
+  static const String authEndpoint = '/auth/login'; 
+  static const String signupEndpoint = '/users/signup';
   
   // Request timeout duration
   static const Duration requestTimeout = Duration(seconds: 30);

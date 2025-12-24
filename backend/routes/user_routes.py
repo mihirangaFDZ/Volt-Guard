@@ -1,3 +1,4 @@
+from http.client import HTTPException
 from fastapi import APIRouter
 from database import user_col
 from app.models.user_model import User
@@ -5,11 +6,17 @@ from utils.security import hash_password
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-@router.post("/")
+@router.post("/signup")
 def add_user(data: User):
-    user_data = data.dict()
+    existing_user = user_col.find_one({"email": data.email})
+    if existing_user:
+        return {"message": "Email already registered",
+                "success": False,
+                "statusCode": 400
+                }
 
-    # hash the password before saving
+
+    user_data = data.dict()
     user_data["password"] = hash_password(user_data["password"])
 
     user_col.insert_one(user_data)

@@ -55,6 +55,65 @@ class AuthService {
     }
   }
 
+  /// Register a new user account
+  Future<Map<String, dynamic>> signup(
+    String name,
+    String email,
+    String password, {
+    String role = 'user',
+  }) async {
+    final payload = {
+      'user_id': _generateUserId(),
+      'name': name,
+      'email': email,
+      'role': role,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'password': password,
+    };
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse('${ApiConfig.baseUrl}${ApiConfig.signupEndpoint}'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(ApiConfig.requestTimeout);
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == false) {
+          return {
+            'success': false,
+            'message': data['message'] ?? 'Signup failed. Please try again.',
+          };
+        }
+        return {
+          'success': true,
+          'data': data,
+        };
+      }
+
+      return {
+        'success': false,
+        'message': _extractErrorMessage(response.body),
+      };
+    } on TimeoutException {
+      return {
+        'success': false,
+        'message': 'Signup request timed out. Please try again.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'An error occurred: $e',
+      };
+    }
+  }
+
   /// Save access token to local storage
   Future<void> saveToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
@@ -99,5 +158,19 @@ class AuthService {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ${token ?? ""}',
     };
+  }
+
+  String _generateUserId() {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    return 'USR$timestamp';
+  }
+
+  String _extractErrorMessage(String responseBody) {
+    try {
+      final decoded = jsonDecode(responseBody);
+      return decoded['detail'] ?? decoded['message'] ?? 'Signup failed. Please try again.';
+    } catch (_) {
+      return 'Signup failed. Please try again.';
+    }
   }
 }

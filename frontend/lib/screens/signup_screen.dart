@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:volt_guard/services/auth_service.dart';
 import '../pages/main_page.dart';
 import 'login_screen.dart';
 
@@ -10,7 +11,8 @@ class SignupScreen extends StatefulWidget {
   State<SignupScreen> createState() => _SignupScreenState();
 }
 
-class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderStateMixin {
+class _SignupScreenState extends State<SignupScreen>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -47,6 +49,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
   }
 
   Future<void> _handleSignup() async {
+  
     if (!_acceptTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -61,21 +64,44 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
         _isLoading = true;
       });
 
-      // Simulate API call
-      await Future.delayed(const Duration(seconds: 1));
+      final authService = AuthService();
+      final result = await authService.signup(
+        _nameController.text.trim(),
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
+      );
 
       if (mounted) {
         setState(() {
           _isLoading = false;
         });
-
-        // Navigate to main page on successful signup
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const MainPage(),
-          ),
-        );
+        if (result['success'] == true || result['data'] != null) {
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('User Created!'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+          // Navigate to main page on successful signup
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const LoginScreen(),
+            ),
+          );
+        } else {
+          // Show error message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content:
+                  Text(result['message'] ?? 'Signup failed. Please try again.'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
       }
     }
   }
@@ -84,13 +110,13 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              const Color(0xFF4A90E2),
-              const Color(0xFF2563EB),
+              Color(0xFF4A90E2),
+              Color(0xFF2563EB),
             ],
           ),
         ),
@@ -129,10 +155,11 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                     // Title
                     Text(
                       'Create Account',
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
+                      style:
+                          Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 8),
@@ -171,15 +198,18 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                               fillColor: Colors.grey[50],
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide:
+                                    BorderSide(color: Colors.grey[300]!),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide:
+                                    BorderSide(color: Colors.grey[300]!),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(color: Color(0xFF4A90E2), width: 2),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFF4A90E2), width: 2),
                               ),
                             ),
                             validator: (value) {
@@ -205,15 +235,18 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                               fillColor: Colors.grey[50],
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide:
+                                    BorderSide(color: Colors.grey[300]!),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide:
+                                    BorderSide(color: Colors.grey[300]!),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(color: Color(0xFF4A90E2), width: 2),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFF4A90E2), width: 2),
                               ),
                             ),
                             validator: (value) {
@@ -253,15 +286,18 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                               fillColor: Colors.grey[50],
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide:
+                                    BorderSide(color: Colors.grey[300]!),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide:
+                                    BorderSide(color: Colors.grey[300]!),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(color: Color(0xFF4A90E2), width: 2),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFF4A90E2), width: 2),
                               ),
                             ),
                             validator: (value) {
@@ -291,7 +327,8 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                                 ),
                                 onPressed: () {
                                   setState(() {
-                                    _obscureConfirmPassword = !_obscureConfirmPassword;
+                                    _obscureConfirmPassword =
+                                        !_obscureConfirmPassword;
                                   });
                                 },
                               ),
@@ -299,15 +336,18 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                               fillColor: Colors.grey[50],
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide:
+                                    BorderSide(color: Colors.grey[300]!),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide:
+                                    BorderSide(color: Colors.grey[300]!),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(color: Color(0xFF4A90E2), width: 2),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFF4A90E2), width: 2),
                               ),
                             ),
                             validator: (value) {
@@ -369,7 +409,8 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
                                         valueColor:
-                                            AlwaysStoppedAnimation<Color>(Colors.white),
+                                            AlwaysStoppedAnimation<Color>(
+                                                Colors.white),
                                       ),
                                     )
                                   : const Text(
@@ -391,7 +432,8 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                       children: [
                         Text(
                           'Already have an account? ',
-                          style: TextStyle(color: Colors.white.withOpacity(0.9)),
+                          style:
+                              TextStyle(color: Colors.white.withOpacity(0.9)),
                         ),
                         TextButton(
                           onPressed: () {
