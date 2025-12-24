@@ -1,0 +1,52 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4A90E2;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2563EB;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="shieldGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#E0E7FF;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="boltGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FBBF24;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#F59E0B;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+      <feOffset dx="0" dy="4" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge> 
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/> 
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="512" cy="512" r="512" fill="url(#bgGradient)"/>
+  
+  <!-- Shield shape with shadow -->
+  <g filter="url(#shadow)">
+    <path d="M512 150 C680 150, 780 180, 820 220 C820 350, 820 480, 820 550 C820 700, 700 850, 512 920 C324 850, 204 700, 204 550 C204 480, 204 350, 204 220 C244 180, 344 150, 512 150 Z" 
+          fill="url(#shieldGradient)" 
+          stroke="#1E40AF" 
+          stroke-width="12"/>
+  </g>
+  
+  <!-- Lightning bolt -->
+  <path d="M562 320 L462 520 L532 520 L482 720 L632 480 L542 480 L592 320 Z" 
+        fill="url(#boltGradient)" 
+        stroke="#D97706" 
+        stroke-width="6"
+        stroke-linejoin="round"/>
+  
+  <!-- Accent circles for energy -->
+  <circle cx="420" cy="400" r="20" fill="#FBBF24" opacity="0.6"/>
+  <circle cx="604" cy="400" r="20" fill="#FBBF24" opacity="0.6"/>
+  <circle cx="420" cy="620" r="20" fill="#FBBF24" opacity="0.6"/>
+  <circle cx="604" cy="620" r="20" fill="#FBBF24" opacity="0.6"/>
+</svg>

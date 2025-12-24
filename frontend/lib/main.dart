@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'screens/welcome_screen.dart';
+import 'screens/login_screen.dart';
 
 void main() {
   runApp(const VoltGuardApp());
@@ -15,7 +15,7 @@ class VoltGuardApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00C853),
+          seedColor: const Color(0xFF4A90E2),
           brightness: Brightness.light,
         ),
         useMaterial3: true,
@@ -53,7 +53,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_ready) return const HomeShell();
+    if (_ready) return const LoginScreen();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D1A14),
@@ -70,7 +70,7 @@ class _SplashScreenState extends State<SplashScreen> {
                   border: Border.all(color: Colors.white.withOpacity(0.12)),
                 ),
                 child: Image.asset(
-                  'assets/images/loading.png',
+                  'assets/images/icon.png',
                   width: 120,
                   height: 120,
                 ),
@@ -126,9 +126,9 @@ class _HomeShellState extends State<HomeShell> {
         backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
-        title: Row(
+        title: const Row(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             Icon(Icons.bolt, color: Color(0xFF00C853)),
             SizedBox(width: 8),
             Text(
