@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:volt_guard/services/auth_service.dart';
-import '../pages/main_page.dart';
 import 'login_screen.dart';
 
 /// Sign up screen for new user registration with modern Volt Guard branding
