@@ -8,11 +8,14 @@ import 'dart:async';
 class AuthService {
   static const String _tokenKey = 'access_token';
   static const String _userNameKey = 'user_name';
+  static const String _userIdKey = 'user_id';
 
   /// Login user with email and password
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
-      final response = await http.post(Uri.parse('${ApiConfig.baseUrl}${ApiConfig.authEndpoint}'),
+      final response = await http
+          .post(
+            Uri.parse('${ApiConfig.baseUrl}${ApiConfig.authEndpoint}'),
             headers: {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
@@ -27,10 +30,12 @@ class AuthService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
 
-
         // Store token and user name
         await saveToken(data['access_token']);
         await saveUserName(data['user_name']);
+        if (data['user_id'] != null) {
+          await saveUserId(data['user_id'].toString());
+        }
 
         return {
           'success': true,
@@ -126,6 +131,12 @@ class AuthService {
     await prefs.setString(_userNameKey, userName);
   }
 
+  /// Save user id to local storage
+  Future<void> saveUserId(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_userIdKey, userId);
+  }
+
   /// Get stored access token
   Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -136,6 +147,12 @@ class AuthService {
   Future<String?> getUserName() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_userNameKey);
+  }
+
+  /// Get stored user id
+  Future<String?> getUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_userIdKey);
   }
 
   /// Check if user is logged in
@@ -149,6 +166,7 @@ class AuthService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
     await prefs.remove(_userNameKey);
+    await prefs.remove(_userIdKey);
   }
 
   /// Get authorization header for API requests
@@ -168,7 +186,9 @@ class AuthService {
   String _extractErrorMessage(String responseBody) {
     try {
       final decoded = jsonDecode(responseBody);
-      return decoded['detail'] ?? decoded['message'] ?? 'Signup failed. Please try again.';
+      return decoded['detail'] ??
+          decoded['message'] ??
+          'Signup failed. Please try again.';
     } catch (_) {
       return 'Signup failed. Please try again.';
     }

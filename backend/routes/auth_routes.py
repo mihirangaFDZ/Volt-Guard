@@ -24,5 +24,7 @@ def login(data: loginReq):
     return {
         "access_token": token,
         "token_type": "bearer",
-        "user_name": user["name"]
+        "user_name": user["name"],
+        "user_id": user["user_id"],
+        "role": user.get("role", "user")
     }
