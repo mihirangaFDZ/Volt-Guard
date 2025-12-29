@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dashboard_page.dart';
 import 'devices_page.dart';
 import 'analytics_page.dart';
+import 'fault_detection_page.dart';
 import 'profile_page.dart';
 
 /// Main page with bottom navigation bar for app navigation
@@ -19,6 +20,7 @@ class _MainPageState extends State<MainPage> {
     const DashboardPage(),
     const DevicesPage(),
     const AnalyticsPage(),
+    const FaultDetectionPage(),
     const ProfilePage(),
   ];
 
@@ -48,6 +50,11 @@ class _MainPageState extends State<MainPage> {
             icon: Icon(Icons.analytics_outlined),
             selectedIcon: Icon(Icons.analytics),
             label: 'Analytics',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.bug_report_outlined),
+            selectedIcon: Icon(Icons.bug_report),
+            label: 'Faults',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outlined),

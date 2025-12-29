@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'screens/welcome_screen.dart';
+import 'screens/login_screen.dart';
 
 void main() {
   runApp(const VoltGuardApp());
@@ -15,515 +15,707 @@ class VoltGuardApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00C853),
+          seedColor: const Color(0xFF4A90E2),
           brightness: Brightness.light,
         ),
         useMaterial3: true,
         fontFamily: 'Roboto',
       ),
-      home: const LandingPage(),
+      home: const SplashScreen(),
     );
   }
 }
 
-class LandingPage extends StatefulWidget {
-  const LandingPage({super.key});
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
 
   @override
-  State<LandingPage> createState() => _LandingPageState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _LandingPageState extends State<LandingPage> {
+class _SplashScreenState extends State<SplashScreen> {
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  Future<void> _start() async {
+    await Future.delayed(const Duration(milliseconds: 1600));
+    if (mounted) {
+      setState(() {
+        _ready = true;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_ready) return const LoginScreen();
+
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          // App Bar
-          SliverAppBar(
-            expandedHeight: 0,
-            floating: true,
-            pinned: true,
-            backgroundColor: Colors.white,
-            elevation: 0,
-            title: Row(
+      backgroundColor: const Color(0xFF0D1A14),
+      body: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: Colors.white.withOpacity(0.12)),
+                ),
+                child: Image.asset(
+                  'assets/images/icon.png',
+                  width: 120,
+                  height: 120,
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Volt Guard',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Loading your energy cockpit...',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.75),
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class HomeShell extends StatefulWidget {
+  const HomeShell({super.key});
+
+  @override
+  State<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<HomeShell> {
+  int _currentIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      const DashboardPage(),
+      const AnalyticsPage(),
+      const AlertsPage(),
+      const DevicesPage(),
+      const InsightsPage(),
+    ];
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F9F9),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: true,
+        title: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.bolt, color: Color(0xFF00C853)),
+            SizedBox(width: 8),
+            Text(
+              'Volt Guard',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            onPressed: () {},
+            icon: const Icon(Icons.account_circle_outlined),
+            color: Colors.black87,
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: SafeArea(
+        child: IndexedStack(
+          index: _currentIndex,
+          children: pages,
+        ),
+      ),
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 10,
+              color: Colors.black12,
+              offset: Offset(0, -1),
+            )
+          ],
+        ),
+        child: BottomNavigationBar(
+          type: BottomNavigationBarType.fixed,
+          currentIndex: _currentIndex,
+          onTap: (index) => setState(() => _currentIndex = index),
+          selectedItemColor: const Color(0xFF00C853),
+          unselectedItemColor: Colors.grey,
+          showUnselectedLabels: true,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.space_dashboard_outlined),
+              activeIcon: Icon(Icons.space_dashboard),
+              label: 'Dashboard',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.show_chart_outlined),
+              activeIcon: Icon(Icons.show_chart),
+              label: 'Analytics',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.notifications_active_outlined),
+              activeIcon: Icon(Icons.notifications_active),
+              label: 'Alerts',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.devices_other_outlined),
+              activeIcon: Icon(Icons.devices),
+              label: 'Devices',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.lightbulb_outline),
+              activeIcon: Icon(Icons.lightbulb),
+              label: 'Insights',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class DashboardPage extends StatelessWidget {
+  const DashboardPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF00C853), Color(0xFF00E676)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        const Color(0xFF00C853),
-                        const Color(0xFF00E676),
-                      ],
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.bolt, color: Colors.white, size: 28),
                     ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.bolt,
+                    const SizedBox(width: 12),
+                    const Text(
+                      'Today',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Smart energy,\nready for you.',
+                  style: TextStyle(
                     color: Colors.white,
-                    size: 24,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 24,
                   ),
                 ),
-                const SizedBox(width: 12),
-                const Text(
-                  'Volt Guard',
-                  style: TextStyle(
-                    color: Color(0xFF1A1A1A),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 20,
-                  ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Text(
+                      '12.4 kWh',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.16),
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      child: const Text(
+                        '▼ 6% vs yesterday',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () {},
-                child: const Text('Sign In'),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: const [
+              Expanded(
+                child: _InfoCard(
+                  title: 'Active devices',
+                  value: '14',
+                  icon: Icons.devices_other,
+                  color: Color(0xFF00C853),
+                ),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: 12),
+              Expanded(
+                child: _InfoCard(
+                  title: 'Alerts',
+                  value: '02',
+                  icon: Icons.notifications_active,
+                  color: Color(0xFFFF9800),
+                ),
+              ),
             ],
           ),
-          
-          // Hero Section
-          SliverToBoxAdapter(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    const Color(0xFF00C853),
-                    const Color(0xFF00E676),
-                    const Color(0xFF69F0AE),
-                  ],
+          const SizedBox(height: 12),
+          Row(
+            children: const [
+              Expanded(
+                child: _InfoCard(
+                  title: 'Cost today',
+                  value: '\$4.62',
+                  icon: Icons.savings_outlined,
+                  color: Color(0xFF1E88E5),
                 ),
               ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 60),
-                child: Column(
-                  children: [
-                    const Icon(
-                      Icons.bolt,
-                      size: 80,
-                      color: Colors.white,
-                    ),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'Smart Energy\nManagement System',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 36,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Monitor, analyze, and optimize your energy consumption\nwith AI-powered insights',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.white.withOpacity(0.9),
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        ElevatedButton(
-                          onPressed: () {},
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: const Color(0xFF00C853),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 32,
-                              vertical: 16,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                            elevation: 4,
-                          ),
-                          child: const Row(
-                            children: [
-                              Text(
-                                'Get Started',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              SizedBox(width: 8),
-                              Icon(Icons.arrow_forward, size: 20),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        OutlinedButton(
-                          onPressed: () {},
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: const BorderSide(color: Colors.white, width: 2),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 32,
-                              vertical: 16,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                          ),
-                          child: const Text(
-                            'Learn More',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 40),
-                    // Stats Row
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _buildStatItem('10K+', 'Active Users'),
-                        _buildStatItem('25%', 'Energy Saved'),
-                        _buildStatItem('99.9%', 'Uptime'),
-                      ],
-                    ),
-                  ],
+              SizedBox(width: 12),
+              Expanded(
+                child: _InfoCard(
+                  title: 'Efficiency',
+                  value: '92%',
+                  icon: Icons.speed,
+                  color: Color(0xFF8E24AA),
                 ),
               ),
-            ),
+            ],
           ),
-          
-          // Features Section
-          SliverToBoxAdapter(
-            child: Container(
-              color: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 60),
-              child: Column(
-                children: [
-                  const Text(
-                    'Powerful Features',
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1A1A1A),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Everything you need to manage your energy efficiently',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  const SizedBox(height: 48),
-                  _buildFeatureCard(
-                    icon: Icons.analytics,
-                    title: 'Real-time Monitoring',
-                    description:
-                        'Track energy consumption from all your IoT-enabled devices in real-time with detailed analytics and insights.',
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF00C853), Color(0xFF00E676)],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  _buildFeatureCard(
-                    icon: Icons.psychology,
-                    title: 'AI-Powered Predictions',
-                    description:
-                        'Machine learning models analyze your usage patterns to predict future energy consumption and optimize costs.',
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF2196F3), Color(0xFF42A5F5)],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  _buildFeatureCard(
-                    icon: Icons.warning_amber,
-                    title: 'Anomaly Detection',
-                    description:
-                        'Automatically detect unusual consumption patterns and potential appliance malfunctions before they become problems.',
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFFFF6F00), Color(0xFFFF9800)],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  _buildFeatureCard(
-                    icon: Icons.build,
-                    title: 'Fault Detection',
-                    description:
-                        'Identify potential equipment failures early with advanced diagnostics and receive timely maintenance alerts.',
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFFD32F2F), Color(0xFFE57373)],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          // Benefits Section
-          SliverToBoxAdapter(
-            child: Container(
-              color: const Color(0xFFF5F5F5),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 60),
-              child: Column(
-                children: [
-                  const Text(
-                    'Why Choose Volt Guard?',
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1A1A1A),
-                    ),
-                  ),
-                  const SizedBox(height: 48),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildBenefitCard(
-                          icon: Icons.savings,
-                          title: 'Save Money',
-                          description: 'Reduce energy costs by up to 25%',
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _buildBenefitCard(
-                          icon: Icons.eco,
-                          title: 'Eco-Friendly',
-                          description: 'Lower your carbon footprint',
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildBenefitCard(
-                          icon: Icons.notifications_active,
-                          title: 'Smart Alerts',
-                          description: 'Get notified of issues instantly',
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _buildBenefitCard(
-                          icon: Icons.mobile_friendly,
-                          title: 'Easy to Use',
-                          description: 'Intuitive mobile interface',
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          // CTA Section
-          SliverToBoxAdapter(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xFF1A237E),
-                    Color(0xFF283593),
-                    Color(0xFF3949AB),
-                  ],
+          const SizedBox(height: 16),
+          const _SectionHeader(title: 'Quick actions'),
+          const SizedBox(height: 8),
+          Row(
+            children: const [
+              Expanded(
+                child: _QuickAction(
+                  icon: Icons.flash_on,
+                  label: 'Boost',
                 ),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 60),
-              child: Column(
-                children: [
-                  const Text(
-                    'Start Saving Energy Today',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Join thousands of users who are already managing\ntheir energy smarter',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.white.withOpacity(0.9),
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  ElevatedButton(
-                    onPressed: () {},
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00C853),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 48,
-                        vertical: 20,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      elevation: 8,
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Download Now',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(width: 12),
-                        Icon(Icons.download, size: 24),
-                      ],
-                    ),
-                  ),
-                ],
+              SizedBox(width: 12),
+              Expanded(
+                child: _QuickAction(
+                  icon: Icons.eco,
+                  label: 'Eco Mode',
+                ),
               ),
-            ),
+              SizedBox(width: 12),
+              Expanded(
+                child: _QuickAction(
+                  icon: Icons.shield_moon_outlined,
+                  label: 'Sleep',
+                ),
+              ),
+            ],
           ),
-          
-          // Footer
-          SliverToBoxAdapter(
-            child: Container(
-              color: const Color(0xFF1A1A1A),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF00C853),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(
-                          Icons.bolt,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Volt Guard',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 20,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Smart Energy Management System',
-                    style: TextStyle(
-                      color: Colors.grey[400],
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Divider(color: Colors.grey[800]),
-                  const SizedBox(height: 16),
-                  Text(
-                    '© 2024 Volt Guard. All rights reserved.',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Built with ❤️ for a sustainable energy future',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          const SizedBox(height: 18),
+          const _SectionHeader(title: 'Recent activity'),
+          const SizedBox(height: 8),
+          const _ActivityTile(
+            title: 'Living room hub',
+            subtitle: 'Energy down 12% today',
+            icon: Icons.sensors,
+            color: Color(0xFF00C853),
+          ),
+          const _ActivityTile(
+            title: 'Washer cycle completed',
+            subtitle: '1.2 kWh used • 38 mins',
+            icon: Icons.local_laundry_service_outlined,
+            color: Color(0xFF1E88E5),
+          ),
+          const _ActivityTile(
+            title: 'Battery backup',
+            subtitle: 'Stored: 64% • Healthy',
+            icon: Icons.battery_charging_full,
+            color: Color(0xFFFF9800),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildStatItem(String value, String label) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 32,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
+class AnalyticsPage extends StatelessWidget {
+  const AnalyticsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        _SectionHeader(title: 'Analytics'),
+        SizedBox(height: 8),
+        _TrendCard(
+          title: 'Usage this week',
+          value: '84 kWh',
+          change: '+4.1%',
+          color: Color(0xFF1E88E5),
         ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            color: Colors.white.withOpacity(0.8),
+        SizedBox(height: 12),
+        _TrendCard(
+          title: 'Predicted monthly spend',
+          value: '\$78.40',
+          change: '-2.3%',
+          color: Color(0xFF00C853),
+        ),
+        SizedBox(height: 12),
+        _TrendCard(
+          title: 'Peak hours detected',
+          value: '6:00 PM - 9:00 PM',
+          change: 'shifted later',
+          color: Color(0xFFFF9800),
+        ),
+      ],
+    );
+  }
+}
+
+class AlertsPage extends StatelessWidget {
+  const AlertsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        _SectionHeader(title: 'Alerts'),
+        SizedBox(height: 8),
+        _AlertCard(
+          title: 'High usage detected',
+          subtitle: 'Kitchen appliances spiked at 7:45 PM',
+          color: Color(0xFFFF9800),
+          icon: Icons.warning_amber_rounded,
+        ),
+        _AlertCard(
+          title: 'Device offline',
+          subtitle: 'Garage sensor disconnected • 5 mins ago',
+          color: Color(0xFFEF5350),
+          icon: Icons.wifi_off_rounded,
+        ),
+        _AlertCard(
+          title: 'New firmware available',
+          subtitle: 'Update hub to improve stability',
+          color: Color(0xFF1E88E5),
+          icon: Icons.system_update_alt_rounded,
+        ),
+      ],
+    );
+  }
+}
+
+class DevicesPage extends StatelessWidget {
+  const DevicesPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        _SectionHeader(title: 'Devices'),
+        SizedBox(height: 8),
+        _DeviceTile(
+          title: 'Living room hub',
+          subtitle: 'Online • 1.2 kWh',
+          icon: Icons.hub,
+          color: Color(0xFF00C853),
+        ),
+        _DeviceTile(
+          title: 'Solar inverter',
+          subtitle: 'Producing 4.8 kW',
+          icon: Icons.wb_sunny_outlined,
+          color: Color(0xFFFFC107),
+        ),
+        _DeviceTile(
+          title: 'Battery backup',
+          subtitle: '64% charge • Stable',
+          icon: Icons.battery_charging_full,
+          color: Color(0xFF1E88E5),
+        ),
+        _DeviceTile(
+          title: 'Garage sensor',
+          subtitle: 'Offline • Check power',
+          icon: Icons.sensors_off,
+          color: Color(0xFFEF5350),
+        ),
+      ],
+    );
+  }
+}
+
+class InsightsPage extends StatelessWidget {
+  const InsightsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final tips = [
+      'Shift laundry cycles to off-peak hours to save up to 18% weekly.',
+      'Enable eco mode on always-on devices to trim idle usage.',
+      'Schedule battery discharge during peak tariffs to offset costs.',
+      'Set alerts for abnormal baseload to catch silent energy leaks.',
+    ];
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const _SectionHeader(title: 'Insights'),
+        const SizedBox(height: 8),
+        ...tips.map(
+          (tip) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00C853).withOpacity(0.14),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.lightbulb,
+                      color: Color(0xFF00C853),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      tip,
+                      style: const TextStyle(
+                        color: Color(0xFF1A1A1A),
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ],
     );
   }
+}
 
-  Widget _buildFeatureCard({
-    required IconData icon,
-    required String title,
-    required String description,
-    required Gradient gradient,
-  }) {
+class _InfoCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  const _InfoCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: const TextStyle(color: Colors.grey, fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1A1A1A),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+
+  const _SectionHeader({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        color: Color(0xFF1A1A1A),
+      ),
+    );
+  }
+}
+
+class _QuickAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _QuickAction({
+    required this.icon,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: const Color(0xFF00C853)),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF1A1A1A),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActivityTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+
+  const _ActivityTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              gradient: gradient,
-              borderRadius: BorderRadius.circular(12),
+              color: color.withOpacity(0.12),
+              shape: BoxShape.circle,
             ),
-            child: Icon(
-              icon,
-              color: Colors.white,
-              size: 32,
-            ),
+            child: Icon(icon, color: color),
           ),
-          const SizedBox(width: 20),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -531,19 +723,14 @@ class _LandingPageState extends State<LandingPage> {
                 Text(
                   title,
                   style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1A1A1A),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 Text(
-                  description,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[600],
-                    height: 1.5,
-                  ),
+                  subtitle,
+                  style: const TextStyle(color: Colors.grey, fontSize: 13),
                 ),
               ],
             ),
@@ -552,57 +739,206 @@ class _LandingPageState extends State<LandingPage> {
       ),
     );
   }
+}
 
-  Widget _buildBenefitCard({
-    required IconData icon,
-    required String title,
-    required String description,
-  }) {
+class _TrendCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final String change;
+  final Color color;
+
+  const _TrendCard({
+    required this.title,
+    required this.value,
+    required this.change,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
             blurRadius: 8,
-            offset: const Offset(0, 2),
+            offset: const Offset(0, 3),
           ),
         ],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF00C853).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              icon,
-              color: const Color(0xFF00C853),
-              size: 32,
-            ),
-          ),
-          const SizedBox(height: 16),
           Text(
             title,
             style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF1A1A1A),
+              fontSize: 14,
+              color: Colors.grey,
             ),
           ),
           const SizedBox(height: 8),
-          Text(
-            description,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.grey[600],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1A1A1A),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(40),
+                ),
+                child: Text(
+                  change,
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Color color;
+  final IconData icon;
+
+  const _AlertCard({
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Colors.grey, fontSize: 13),
+                ),
+              ],
             ),
           ),
+          const Icon(Icons.chevron_right, color: Colors.grey),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeviceTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+
+  const _DeviceTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Colors.grey, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.toggle_on, color: Color(0xFF00C853), size: 30),
         ],
       ),
     );
