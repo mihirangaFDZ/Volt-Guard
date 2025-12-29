@@ -1,8 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from database import anomaly_col
 from app.models.anomaly_model import Anomaly
+from utils.jwt_handler import get_current_user
 
-router = APIRouter(prefix="/anomalies", tags=["Anomalies"])
+router = APIRouter(
+    prefix="/anomalies",
+    tags=["Anomalies"],
+    dependencies=[Depends(get_current_user)],
+)
 
 @router.post("/")
 def add_anomaly(anomaly: Anomaly):

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'screens/login_screen.dart';
+import 'package:volt_guard/screens/login_screen.dart';
 
 void main() {
   runApp(const VoltGuardApp());
@@ -21,81 +21,7 @@ class VoltGuardApp extends StatelessWidget {
         useMaterial3: true,
         fontFamily: 'Roboto',
       ),
-      home: const SplashScreen(),
-    );
-  }
-}
-
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
-
-  @override
-  State<SplashScreen> createState() => _SplashScreenState();
-}
-
-class _SplashScreenState extends State<SplashScreen> {
-  bool _ready = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _start();
-  }
-
-  Future<void> _start() async {
-    await Future.delayed(const Duration(milliseconds: 1600));
-    if (mounted) {
-      setState(() {
-        _ready = true;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_ready) return const LoginScreen();
-
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D1A14),
-      body: SafeArea(
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(22),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: Colors.white.withOpacity(0.12)),
-                ),
-                child: Image.asset(
-                  'assets/images/icon.png',
-                  width: 120,
-                  height: 120,
-                ),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Volt Guard',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Loading your energy cockpit...',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.75),
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      home: const LoginScreen(),
     );
   }
 }
@@ -235,7 +161,8 @@ class DashboardPage extends StatelessWidget {
                         color: Colors.white.withOpacity(0.15),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.bolt, color: Colors.white, size: 28),
+                      child:
+                          const Icon(Icons.bolt, color: Colors.white, size: 28),
                     ),
                     const SizedBox(width: 12),
                     const Text(
@@ -269,7 +196,8 @@ class DashboardPage extends StatelessWidget {
                     ),
                     const SizedBox(width: 10),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.16),
                         borderRadius: BorderRadius.circular(30),
@@ -285,8 +213,8 @@ class DashboardPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          Row(
-            children: const [
+          const Row(
+            children: [
               Expanded(
                 child: _InfoCard(
                   title: 'Active devices',
@@ -331,8 +259,8 @@ class DashboardPage extends StatelessWidget {
           const SizedBox(height: 16),
           const _SectionHeader(title: 'Quick actions'),
           const SizedBox(height: 8),
-          Row(
-            children: const [
+          const Row(
+            children: [
               Expanded(
                 child: _QuickAction(
                   icon: Icons.flash_on,
@@ -792,7 +720,8 @@ class _TrendCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: color.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(40),

@@ -431,17 +431,17 @@ class DashboardPage extends StatelessWidget {
                 color: Colors.green[700],
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
+              child: const Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'Total Potential Savings',
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const Text(
+                  Text(
                     '\$2.50/day',
                     style: TextStyle(
                       color: Colors.white,
@@ -748,37 +748,3 @@ class DashboardPage extends StatelessWidget {
 }
 
 
-  Widget _buildActivityCard(
-    BuildContext context,
-    String device,
-    String status,
-    IconData icon,
-    Color color,
-    String power,
-  ) {
-    return Card(
-      elevation: 1,
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, color: color),
-        ),
-        title: Text(
-          device,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(status),
-        trailing: Text(
-          power,
-          style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
