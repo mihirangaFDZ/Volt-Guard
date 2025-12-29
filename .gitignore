@@ -84,3 +84,6 @@ htmlcov/
 # Jupyter Notebooks
 .ipynb_checkpoints/
 *.ipynb
+
+voltguard-api/.env
+voltguard-api/requirements.txt
