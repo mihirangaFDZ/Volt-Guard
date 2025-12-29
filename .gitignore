@@ -86,4 +86,3 @@ htmlcov/
 *.ipynb
 
 voltguard-api/.env
-voltguard-api/requirements.txt
