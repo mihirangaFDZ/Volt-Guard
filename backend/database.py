@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # Load .env file from the backend directory
 load_dotenv(dotenv_path=BASE_DIR / '.env')
 
-client = MongoClient(os.getenv("MONGO_URI"))
+client = MongoClient(os.getenv("MONGODB_URL"))
 db = client[os.getenv("MONGODB_DB_NAME")]
 
 devices_col = db["devices"]
