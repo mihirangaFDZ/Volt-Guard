@@ -1,17 +1,17 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-
+import pytz
 from flask import Flask, request, jsonify
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
-# Always load the .env that sits next to this file, no matter the CWD
+# Always load the . env that sits next to this file, no matter the CWD
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 # Accept either MONGO_URI_API or legacy MONGO_URI
-MONGO_URI = os.getenv("MONGO_URI_API") or os.getenv("MONGO_URI")
+MONGO_URI = os. getenv("MONGO_URI_API") or os.getenv("MONGO_URI")
 API_KEY = os.getenv("API_KEY")
 DB_NAME = os.getenv("DB_NAME", "volt_guard")
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "occupancy_telemetry")
@@ -26,6 +26,9 @@ app = Flask(__name__)
 client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
+
+# Sri Lankan timezone
+SL_TZ = pytz. timezone('Asia/Colombo')
 
 
 @app.get("/health")
@@ -50,9 +53,13 @@ def telemetry():
     if missing:
         return jsonify({"ok": False, "error": f"missing fields: {missing}"}), 400
 
+    # Get current time in Sri Lankan timezone
+    now_sl = datetime.now(SL_TZ)
+
     doc = {
         **data,
-        "received_at": datetime.now(timezone.utc),
+        "received_at":  now_sl,  # datetime object with timezone
+        "received_at_formatted": now_sl.strftime("%Y-%m-%d %H:%M:%S"),  # readable string
         "source": "esp8266",
     }
 
