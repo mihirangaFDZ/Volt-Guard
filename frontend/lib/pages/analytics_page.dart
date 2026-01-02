@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/sensor_reading.dart';
 import '../services/analytics_service.dart';
@@ -237,15 +238,15 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 const Text('People Count (estimated)',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: stats.occupancyConfidenceColor.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(8),
+                TextButton(
+                  onPressed: () => _showPeopleEstimateInfo(stats),
+                  style: TextButton.styleFrom(
+                    foregroundColor: stats.occupancyConfidenceColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    minimumSize: const Size(40, 36),
                   ),
                   child: Text(stats.occupancyConfidenceLabel,
-                      style: TextStyle(
-                        color: stats.occupancyConfidenceColor,
+                      style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 11,
                       )),
@@ -274,6 +275,15 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               'Note: PIR/RCWL are binary presence sensors; count is inferred (0 or 1) from recent motion intensity.',
               style: TextStyle(fontSize: 11, color: Colors.grey[600]),
             ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _loadReadings,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Refresh now'),
+              ),
+            )
           ],
         ),
       ),
@@ -374,7 +384,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               ],
             ),
             const SizedBox(height: 12),
-            ...recs.map(_recTile).toList(),
+            ...recs.map((rec) => _recTile(rec, () => _handleRecAction(rec))).toList(),
           ],
         ),
       ),
@@ -407,7 +417,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _recTile(_Recommendation rec) {
+  Widget _recTile(_Recommendation rec, VoidCallback onPressed) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -425,13 +435,23 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: rec.color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-            child: Text(rec.cta, style: TextStyle(color: rec.color, fontSize: 11, fontWeight: FontWeight.w700)),
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: rec.color,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: const Size(64, 36),
+            ),
+            onPressed: onPressed,
+            child: Text(rec.cta, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
+    );
+  }
+
+  void _handleRecAction(_Recommendation rec) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${rec.cta}: ${rec.title}')),
     );
   }
 
@@ -440,32 +460,66 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     final Color color = occupied ? Colors.green : Colors.orange;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Icon(occupied ? Icons.sensor_occupied : Icons.sensor_door, color: color),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('${reading.location} • ${_friendlyTime(reading.receivedAt)}',
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 2),
-                Text(
-                  'Temp ${reading.temperature.toStringAsFixed(1)}°C, Hum ${reading.humidity.toStringAsFixed(0)}%, PIR ${reading.pir}, RCWL ${reading.rcwl}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                ),
-              ],
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _showReadingDetails(reading),
+        child: Row(
+          children: [
+            Icon(occupied ? Icons.sensor_occupied : Icons.sensor_door, color: color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${reading.location} • ${_friendlyTime(reading.receivedAt)}',
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Temp ${reading.temperature.toStringAsFixed(1)}°C, Hum ${reading.humidity.toStringAsFixed(0)}%, PIR ${reading.pir}, RCWL ${reading.rcwl}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-            child: Text(occupied ? 'Occupied' : 'Vacant',
-                style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
-          ),
-        ],
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+              child: Text(occupied ? 'Occupied' : 'Vacant',
+                  style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  void _showReadingDetails(SensorReading reading) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${reading.location} • ${reading.module}',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Text('Seen ${_friendlyTime(reading.receivedAt)}'),
+              const SizedBox(height: 12),
+              Text('PIR: ${reading.pir}, RCWL: ${reading.rcwl}'),
+              Text('Temp: ${reading.temperature.toStringAsFixed(1)}°C, Hum: ${reading.humidity.toStringAsFixed(0)}%'),
+              Text('RSSI: ${reading.rssi ?? 'n/a'} dBm, Uptime: ${reading.uptime ?? 0}s'),
+              if (reading.heap != null) Text('Heap: ${reading.heap} B'),
+              if (reading.ip != null) Text('IP: ${reading.ip}'),
+              if (reading.mac != null) Text('MAC: ${reading.mac}'),
+              if (reading.source != null) Text('Source: ${reading.source}'),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -506,6 +560,14 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
           const SizedBox(height: 2),
           Text(hint, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+          if (label == 'IP' && value != 'n/a')
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => _handleCopy(value),
+                child: const Text('Copy', style: TextStyle(fontSize: 11)),
+              ),
+            ),
         ],
       ),
     );
@@ -517,6 +579,33 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+
+  void _showPeopleEstimateInfo(_DerivedStats stats) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('People Estimate Method'),
+          content: Text(
+            'Uses PIR/RCWL motion hits over the last ${stats.motionWindow} readings; motion hits: ${stats.motionHits}; confidence: ${stats.occupancyConfidenceLabel}.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _handleCopy(String value) {
+    Clipboard.setData(ClipboardData(text: value));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Copied: $value')),
+    );
   }
 }
 
