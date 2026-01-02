@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../models/sensor_reading.dart';
+import '../services/analytics_service.dart';
+
 /// Component-focused analytics page for occupancy, comfort, sensor health, and recommendations
 /// using the provided IoT fields (pir/rcwl, temperature, humidity, rssi, uptime, timestamps).
 class AnalyticsPage extends StatefulWidget {
@@ -10,41 +13,166 @@ class AnalyticsPage extends StatefulWidget {
 }
 
 class _AnalyticsPageState extends State<AnalyticsPage> {
-  final List<SensorReading> _readings = _sampleReadings;
+  final AnalyticsService _analyticsService = AnalyticsService();
+
+  List<SensorReading> _readings = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReadings();
+  }
+
+  Future<void> _loadReadings() async {
+    try {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+
+      final data = await _analyticsService.fetchLatestReadings(limit: 50);
+      if (!mounted) return;
+      setState(() {
+        _readings = data;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Failed to load analytics data: $e';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final SensorReading latest = _readings.last;
-    final _DerivedStats stats = _deriveStats(_readings);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Occupancy & Comfort Analytics'),
       ),
       body: RefreshIndicator(
-        onRefresh: () async {
-          await Future.delayed(const Duration(milliseconds: 500));
-          setState(() {});
-        },
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(latest, stats),
-              const SizedBox(height: 16),
-              _buildPeopleEstimate(stats),
-              const SizedBox(height: 16),
-              _buildComfortCard(stats),
-              const SizedBox(height: 16),
-              _buildSensorHealth(latest, stats),
-              const SizedBox(height: 16),
-              _buildRecommendations(stats),
-              const SizedBox(height: 16),
-              _buildRecentReadings(_readings),
-            ],
+        onRefresh: _loadReadings,
+        child: _buildBody(),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const [
+          SizedBox(
+            height: 280,
+            child: Center(child: CircularProgressIndicator()),
           ),
+        ],
+      );
+    }
+
+    if (_error != null) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          _errorCard(_error!),
+        ],
+      );
+    }
+
+    if (_readings.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          _emptyState(),
+        ],
+      );
+    }
+
+    final SensorReading latest = _latestReading(_readings);
+    final _DerivedStats stats = _deriveStats(_readings);
+
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildHeader(latest, stats),
+          const SizedBox(height: 16),
+          _buildPeopleEstimate(stats),
+          const SizedBox(height: 16),
+          _buildComfortCard(stats),
+          const SizedBox(height: 16),
+          _buildSensorHealth(latest, stats),
+          const SizedBox(height: 16),
+          _buildRecommendations(stats),
+          const SizedBox(height: 16),
+          _buildRecentReadings(_readings),
+        ],
+      ),
+    );
+  }
+
+  SensorReading _latestReading(List<SensorReading> readings) {
+    return readings.reduce((a, b) => a.receivedAt.isAfter(b.receivedAt) ? a : b);
+  }
+
+  Widget _errorCard(String message) {
+    return Card(
+      color: Colors.red.withOpacity(0.08),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.error, color: Colors.red),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Unable to load analytics',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text(message, style: TextStyle(color: Colors.red[700], fontSize: 12)),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _loadReadings,
+              tooltip: 'Retry',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyState() {
+    return const Card(
+      elevation: 0,
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.sensors_off, color: Colors.grey),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'No sensor readings yet. Pull to refresh or wait for devices to send data.',
+                style: TextStyle(fontSize: 13),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -254,7 +382,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   }
 
   Widget _buildRecentReadings(List<SensorReading> readings) {
-    final List<SensorReading> latestFive = readings.reversed.take(5).toList();
+    final List<SensorReading> latestFive = List.of(readings)
+      ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+    final List<SensorReading> topFive = latestFive.take(5).toList();
     return Card(
       elevation: 2,
       child: Padding(
@@ -270,7 +400,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               ],
             ),
             const SizedBox(height: 12),
-            ...latestFive.map((r) => _readingRow(r)).toList(),
+            ...topFive.map((r) => _readingRow(r)).toList(),
           ],
         ),
       ),
@@ -388,38 +518,6 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
   }
-}
-
-class SensorReading {
-  SensorReading({
-    required this.module,
-    required this.location,
-    required this.rcwl,
-    required this.pir,
-    required this.temperature,
-    required this.humidity,
-    required this.receivedAt,
-    this.rssi,
-    this.uptime,
-    this.heap,
-    this.ip,
-    this.mac,
-  });
-
-  final String module;
-  final String location;
-  final int rcwl;
-  final int pir;
-  final double temperature;
-  final double humidity;
-  final DateTime receivedAt;
-  final int? rssi;
-  final int? uptime;
-  final int? heap;
-  final String? ip;
-  final String? mac;
-
-  bool get occupied => rcwl == 1 || pir == 1;
 }
 
 class _DerivedStats {
@@ -593,201 +691,3 @@ List<_Recommendation> _buildRecList(_DerivedStats stats) {
   return recs;
 }
 
-final List<SensorReading> _sampleReadings = [
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 0,
-    temperature: 29.2,
-    humidity: 60.1,
-    receivedAt: DateTime.parse('2025-12-29T15:38:38.770Z'),
-    rssi: -57,
-    uptime: 60,
-    heap: 39336,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 0,
-    temperature: 29.2,
-    humidity: 60.1,
-    receivedAt: DateTime.parse('2025-12-29T16:10:16.842Z'),
-    rssi: -75,
-    uptime: 120,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 0,
-    temperature: 32.9,
-    humidity: 69,
-    receivedAt: DateTime.parse('2025-12-31T09:47:02.976Z'),
-    rssi: -57,
-    uptime: 60,
-    heap: 39336,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 1,
-    temperature: 31.8,
-    humidity: 70,
-    receivedAt: DateTime.parse('2025-12-31T09:51:49.442Z'),
-    rssi: -61,
-    uptime: 360,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 1,
-    temperature: 32.6,
-    humidity: 70,
-    receivedAt: DateTime.parse('2025-12-31T09:59:49.868Z'),
-    rssi: -75,
-    uptime: 840,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 0,
-    temperature: 31.5,
-    humidity: 70,
-    receivedAt: DateTime.parse('2025-12-31T10:03:51.028Z'),
-    rssi: -58,
-    uptime: 1080,
-    heap: 16680,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 0,
-    temperature: 31.9,
-    humidity: 70,
-    receivedAt: DateTime.parse('2025-12-31T10:17:50.205Z'),
-    rssi: -76,
-    uptime: 1921,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 1,
-    temperature: 31.4,
-    humidity: 70,
-    receivedAt: DateTime.parse('2025-12-31T10:19:50.216Z'),
-    rssi: -75,
-    uptime: 2041,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 0,
-    temperature: 31.5,
-    humidity: 70,
-    receivedAt: DateTime.parse('2025-12-31T10:21:50.338Z'),
-    rssi: -75,
-    uptime: 2161,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 0,
-    temperature: 31.9,
-    humidity: 71,
-    receivedAt: DateTime.parse('2025-12-31T10:22:50.331Z'),
-    rssi: -80,
-    uptime: 2221,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 0,
-    temperature: 31.6,
-    humidity: 71,
-    receivedAt: DateTime.parse('2025-12-31T10:23:50.342Z'),
-    rssi: -75,
-    uptime: 2281,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 1,
-    temperature: 31.3,
-    humidity: 73,
-    receivedAt: DateTime.parse('2025-12-31T10:49:50.735Z'),
-    rssi: -73,
-    uptime: 3841,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 1,
-    temperature: 31.8,
-    humidity: 73,
-    receivedAt: DateTime.parse('2025-12-31T10:51:51.031Z'),
-    rssi: -72,
-    uptime: 3961,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-  SensorReading(
-    module: 'MOD001',
-    location: 'Room1_North',
-    rcwl: 1,
-    pir: 1,
-    temperature: 31.8,
-    humidity: 72,
-    receivedAt: DateTime.parse('2025-12-31T11:01:51.199Z'),
-    rssi: -74,
-    uptime: 4562,
-    heap: 17976,
-    ip: '10.176.179.193',
-    mac: '60:01:94:36:A2:F4',
-  ),
-];
