@@ -45,8 +45,8 @@ async def health_check():
 
 app.include_router(auth_router)
 app.include_router(zones.router, prefix="/api/v1")
-app.include_router(devices.router, prefix="/devices")
-app.include_router(energy.router, prefix="/energy")
-app.include_router(prediction.router, prefix="/prediction")
-app.include_router(anomalies.router, prefix="/anomalies")
-app.include_router(user_routes.router, prefix="/users")
+app.include_router(devices.router)
+app.include_router(energy.router)
+app.include_router(prediction.router)
+app.include_router(anomalies.router)
+app.include_router(user_routes.router)
