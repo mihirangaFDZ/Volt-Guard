@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import devices, energy, prediction, anomalies, user_routes, zones
+from routes import devices, energy, prediction, anomalies, user_routes, analytics , zones
 from routes.auth_routes import router as auth_router
 
 
