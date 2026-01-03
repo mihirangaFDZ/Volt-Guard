@@ -4,6 +4,7 @@ class SensorReading {
     required this.location,
     required this.rcwl,
     required this.pir,
+    this.peopleCount,
     required this.temperature,
     required this.humidity,
     required this.receivedAt,
@@ -19,6 +20,7 @@ class SensorReading {
   final String location;
   final int rcwl;
   final int pir;
+  final int? peopleCount;
   final double temperature;
   final double humidity;
   final DateTime receivedAt;
@@ -48,6 +50,9 @@ class SensorReading {
       location: (json['location'] ?? '').toString(),
       rcwl: (json['rcwl'] as num?)?.toInt() ?? 0,
       pir: (json['pir'] as num?)?.toInt() ?? 0,
+      peopleCount: (json['people_count'] as num?)?.toInt() ??
+          (json['people'] as num?)?.toInt() ??
+          (json['count'] as num?)?.toInt(),
       temperature: (json['temperature'] as num?)?.toDouble() ?? 0,
       humidity: (json['humidity'] as num?)?.toDouble() ?? 0,
       receivedAt: parsedTimestamp,

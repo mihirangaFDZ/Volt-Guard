@@ -232,7 +232,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 _pill('Vacancy: ${stats.vacancyMinutes} min'),
                 _pill('Avg temp: ${stats.avgTemp.toStringAsFixed(1)}°C'),
                 _pill('Avg humidity: ${stats.avgHumidity.toStringAsFixed(0)}%'),
-                _pill('Est people: ${stats.estimatedPeople} • ${stats.occupancyConfidenceLabel}'),
+                _pill('People: ${stats.displayPeople} • ${stats.occupancyConfidenceLabel}'),
               ],
             ),
           ],
@@ -253,8 +253,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               children: [
                 Icon(Icons.people, color: stats.occupancyConfidenceColor),
                 const SizedBox(width: 8),
-                const Text('People Count (estimated)',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(
+                  stats.hasActualPeople ? 'People Count (reported)' : 'People Count (estimated)',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
                 const Spacer(),
                 TextButton(
                   onPressed: () => _showPeopleEstimateInfo(stats),
@@ -274,25 +276,31 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
             const SizedBox(height: 12),
             Row(
               children: [
-                Text('${stats.estimatedPeople}',
+                Text('${stats.displayPeople}',
                     style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold)),
                 const SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Based on last ${stats.motionWindow} readings',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[700])),
-                    Text('${stats.motionHits} motion hits (PIR/RCWL)',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                    if (stats.hasActualPeople)
+                      Text('Reported by sensor payload',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[700]))
+                    else ...[
+                      Text('Based on last ${stats.motionWindow} readings',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                      Text('${stats.motionHits} motion hits (PIR/RCWL)',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                    ],
                   ],
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              'Note: PIR/RCWL are binary presence sensors; count is inferred (0 or 1) from recent motion intensity.',
-              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-            ),
+            if (!stats.hasActualPeople)
+              Text(
+                'Note: PIR/RCWL are binary presence sensors; count is inferred (0 or 1) from recent motion intensity.',
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              ),
             const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerRight,
@@ -674,9 +682,11 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('People Estimate Method'),
+          title: const Text('People Count Method'),
           content: Text(
-            'Uses PIR/RCWL motion hits over the last ${stats.motionWindow} readings; motion hits: ${stats.motionHits}; confidence: ${stats.occupancyConfidenceLabel}.',
+            stats.hasActualPeople
+                ? 'This room is reporting a people count directly in the payload. Showing the reported value.'
+                : 'Uses PIR/RCWL motion hits over the last ${stats.motionWindow} readings; motion hits: ${stats.motionHits}; confidence: ${stats.occupancyConfidenceLabel}.',
           ),
           actions: [
             TextButton(
@@ -721,6 +731,8 @@ class _DerivedStats {
     required this.comfortNote,
     required this.tempBandProgress,
     required this.estimatedPeople,
+    required this.displayPeople,
+    required this.hasActualPeople,
     required this.motionHits,
     required this.motionWindow,
     required this.occupancyConfidenceLabel,
@@ -740,6 +752,8 @@ class _DerivedStats {
   final String comfortNote;
   final double tempBandProgress;
   final int estimatedPeople;
+  final int displayPeople;
+  final bool hasActualPeople;
   final int motionHits;
   final int motionWindow;
   final String occupancyConfidenceLabel;
@@ -822,9 +836,16 @@ _DerivedStats _deriveStats(List<SensorReading> readings) {
   final int motionWindow = window.length;
   final int estimatedPeople = motionHits > 0 ? 1 : 0;
   final double confidence = motionWindow == 0 ? 0 : motionHits / motionWindow;
+
+  final int? actualPeople = latest.peopleCount;
+  final int displayPeople = ((actualPeople ?? estimatedPeople).clamp(0, 500)).toInt();
+  final bool hasActualPeople = actualPeople != null;
   final String occupancyConfidenceLabel;
   final Color occupancyConfidenceColor;
-  if (confidence >= 0.7) {
+  if (hasActualPeople) {
+    occupancyConfidenceLabel = 'Reported';
+    occupancyConfidenceColor = Colors.blueGrey;
+  } else if (confidence >= 0.7) {
     occupancyConfidenceLabel = 'High confidence';
     occupancyConfidenceColor = Colors.green;
   } else if (confidence >= 0.4) {
@@ -849,6 +870,8 @@ _DerivedStats _deriveStats(List<SensorReading> readings) {
     comfortNote: comfortNote,
     tempBandProgress: tempBandProgress,
     estimatedPeople: estimatedPeople,
+    displayPeople: displayPeople,
+    hasActualPeople: hasActualPeople,
     motionHits: motionHits,
     motionWindow: motionWindow,
     occupancyConfidenceLabel: occupancyConfidenceLabel,
