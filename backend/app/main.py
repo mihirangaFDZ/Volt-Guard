@@ -5,6 +5,10 @@ from routes.auth_routes import router as auth_router
 
 
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
 
 app = FastAPI(
     title="Volt Guard API",
@@ -23,6 +27,8 @@ if os.getenv("DEBUG", "False").lower() == "true":
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    # Allow any localhost port in development when DEBUG=True
+    allow_origin_regex=os.getenv("ALLOWED_ORIGIN_REGEX", r"^https?://localhost(:[0-9]+)?$"),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

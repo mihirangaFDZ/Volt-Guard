@@ -57,7 +57,8 @@ class PredictionService {
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
-        throw Exception('Failed to load tomorrow\'s prediction: ${response.statusCode}');
+        throw Exception(
+            'Failed to load tomorrow\'s prediction: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching tomorrow\'s prediction: $e');
@@ -80,7 +81,8 @@ class PredictionService {
         final List<dynamic> data = json.decode(response.body);
         return data.cast<Map<String, dynamic>>();
       } else {
-        throw Exception('Failed to load weekly forecast: ${response.statusCode}');
+        throw Exception(
+            'Failed to load weekly forecast: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching weekly forecast: $e');
@@ -103,7 +105,8 @@ class PredictionService {
         final List<dynamic> data = json.decode(response.body);
         return data.cast<Map<String, dynamic>>();
       } else {
-        throw Exception('Failed to load monthly forecast: ${response.statusCode}');
+        throw Exception(
+            'Failed to load monthly forecast: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching monthly forecast: $e');
@@ -133,7 +136,8 @@ class PredictionService {
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
-        throw Exception('Failed to load device prediction: ${response.statusCode}');
+        throw Exception(
+            'Failed to load device prediction: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching device prediction: $e');
@@ -162,7 +166,8 @@ class PredictionService {
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
-        throw Exception('Failed to load peak hours prediction: ${response.statusCode}');
+        throw Exception(
+            'Failed to load peak hours prediction: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching peak hours prediction: $e');
@@ -199,7 +204,8 @@ class PredictionService {
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
-        throw Exception('Failed to load cost prediction: ${response.statusCode}');
+        throw Exception(
+            'Failed to load cost prediction: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching cost prediction: $e');
@@ -222,7 +228,8 @@ class PredictionService {
         final List<dynamic> data = json.decode(response.body);
         return data.cast<Map<String, dynamic>>();
       } else {
-        throw Exception('Failed to load recommendations: ${response.statusCode}');
+        throw Exception(
+            'Failed to load recommendations: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching recommendations: $e');

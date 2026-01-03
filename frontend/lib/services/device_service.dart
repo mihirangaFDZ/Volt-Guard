@@ -103,7 +103,8 @@ class DeviceService {
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
-        throw Exception('Failed to load device consumption: ${response.statusCode}');
+        throw Exception(
+            'Failed to load device consumption: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching device consumption: $e');
@@ -126,7 +127,8 @@ class DeviceService {
         final List<dynamic> data = json.decode(response.body);
         return data.cast<Map<String, dynamic>>();
       } else {
-        throw Exception('Failed to load devices by room: ${response.statusCode}');
+        throw Exception(
+            'Failed to load devices by room: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching devices by room: $e');
@@ -134,17 +136,20 @@ class DeviceService {
   }
 
   /// Add new device
-  Future<Map<String, dynamic>> addDevice(Map<String, dynamic> deviceData) async {
+  Future<Map<String, dynamic>> addDevice(
+      Map<String, dynamic> deviceData) async {
     try {
       final uri = Uri.parse(
         '${ApiConfig.apiBaseUrl}${ApiConfig.devicesEndpoint}',
       );
 
-      final response = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(deviceData),
-      ).timeout(ApiConfig.requestTimeout);
+      final response = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode(deviceData),
+          )
+          .timeout(ApiConfig.requestTimeout);
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         return json.decode(response.body);
@@ -166,11 +171,13 @@ class DeviceService {
         '${ApiConfig.apiBaseUrl}${ApiConfig.devicesEndpoint}/$deviceId',
       );
 
-      final response = await http.put(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(deviceData),
-      ).timeout(ApiConfig.requestTimeout);
+      final response = await http
+          .put(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode(deviceData),
+          )
+          .timeout(ApiConfig.requestTimeout);
 
       if (response.statusCode == 200) {
         return json.decode(response.body);

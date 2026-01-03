@@ -1,8 +1,13 @@
 fastapi
 uvicorn
 pymongo
+dnspython
+certifi
 python-dotenv
 pandas
 numpy
 scikit-learn
 tensorflow
+passlib
+bcrypt
+python-jose

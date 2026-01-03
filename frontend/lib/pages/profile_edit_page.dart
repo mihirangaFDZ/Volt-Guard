@@ -71,7 +71,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
               children: [
                 CircleAvatar(
                   radius: 52,
-                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primaryContainer,
                   child: Icon(
                     Icons.person,
                     size: 52,
@@ -81,13 +82,15 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                 ElevatedButton.icon(
                   onPressed: () {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Profile photo upload coming soon')),
+                      const SnackBar(
+                          content: Text('Profile photo upload coming soon')),
                     );
                   },
                   icon: const Icon(Icons.photo_camera_outlined, size: 18),
                   label: const Text('Change'),
                   style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),

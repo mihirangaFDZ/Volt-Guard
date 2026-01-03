@@ -13,8 +13,7 @@ class NotificationService {
   List<AppNotification> get notifications => List.unmodifiable(_notifications);
 
   /// Get unread notifications count
-  int get unreadCount =>
-      _notifications.where((n) => !n.isRead).length;
+  int get unreadCount => _notifications.where((n) => !n.isRead).length;
 
   /// Add a listener for new notifications
   void addListener(Function(AppNotification) listener) {

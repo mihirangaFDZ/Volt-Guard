@@ -91,7 +91,8 @@ class AnomalyService {
   }
 
   /// Get anomalies by device
-  Future<List<Map<String, dynamic>>> getAnomaliesByDevice(String deviceId) async {
+  Future<List<Map<String, dynamic>>> getAnomaliesByDevice(
+      String deviceId) async {
     try {
       final uri = Uri.parse(
         '${ApiConfig.apiBaseUrl}${ApiConfig.anomaliesEndpoint}/device/$deviceId',
@@ -106,7 +107,8 @@ class AnomalyService {
         final List<dynamic> data = json.decode(response.body);
         return data.cast<Map<String, dynamic>>();
       } else {
-        throw Exception('Failed to load device anomalies: ${response.statusCode}');
+        throw Exception(
+            'Failed to load device anomalies: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching device anomalies: $e');
@@ -123,11 +125,13 @@ class AnomalyService {
         '${ApiConfig.apiBaseUrl}${ApiConfig.anomaliesEndpoint}/$anomalyId/resolve',
       );
 
-      final response = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'resolution': resolution}),
-      ).timeout(ApiConfig.requestTimeout);
+      final response = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'resolution': resolution}),
+          )
+          .timeout(ApiConfig.requestTimeout);
 
       if (response.statusCode == 200) {
         return json.decode(response.body);
@@ -166,7 +170,8 @@ class AnomalyService {
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
-        throw Exception('Failed to load anomaly statistics: ${response.statusCode}');
+        throw Exception(
+            'Failed to load anomaly statistics: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching anomaly statistics: $e');
@@ -189,7 +194,8 @@ class AnomalyService {
         final Map<String, dynamic> data = json.decode(response.body);
         return data.map((key, value) => MapEntry(key, value as int));
       } else {
-        throw Exception('Failed to load severity counts: ${response.statusCode}');
+        throw Exception(
+            'Failed to load severity counts: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching severity counts: $e');

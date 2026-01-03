@@ -16,7 +16,7 @@ class EnergyService {
       final queryParams = <String, String>{
         'period': period,
       };
-      
+
       if (deviceId != null) queryParams['device_id'] = deviceId;
       if (roomId != null) queryParams['room_id'] = roomId;
       if (startDate != null) {
@@ -60,7 +60,8 @@ class EnergyService {
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
-        throw Exception('Failed to load real-time data: ${response.statusCode}');
+        throw Exception(
+            'Failed to load real-time data: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching real-time data: $e');
@@ -82,7 +83,8 @@ class EnergyService {
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
-        throw Exception('Failed to load today\'s summary: ${response.statusCode}');
+        throw Exception(
+            'Failed to load today\'s summary: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching today\'s summary: $e');
@@ -183,7 +185,8 @@ class EnergyService {
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
-        throw Exception('Failed to load cost breakdown: ${response.statusCode}');
+        throw Exception(
+            'Failed to load cost breakdown: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching cost breakdown: $e');

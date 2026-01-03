@@ -1,6 +1,7 @@
 # Dashboard Features Documentation
 
 ## Overview
+
 The Volt-Guard dashboard provides real-time visualization, alerts, and customizable widgets for comprehensive energy monitoring and management.
 
 ## Features Implemented
@@ -8,12 +9,14 @@ The Volt-Guard dashboard provides real-time visualization, alerts, and customiza
 ### 1. **Real-Time Visualization**
 
 #### Energy Consumption Chart
+
 - Live power usage monitoring with 30-second refresh intervals
 - Interactive line chart showing real-time power consumption
 - Color-coded visualization for better readability
 - Gradient area under curve for enhanced visual appeal
 
 #### Today's Energy Summary
+
 - Total consumption (kWh)
 - Estimated cost
 - Peak hour identification
@@ -23,6 +26,7 @@ The Volt-Guard dashboard provides real-time visualization, alerts, and customiza
 ### 2. **Alert System**
 
 #### Active Anomalies Widget
+
 - Real-time anomaly detection and display
 - Color-coded severity levels:
   - **Red**: High/Critical severity
@@ -33,7 +37,9 @@ The Volt-Guard dashboard provides real-time visualization, alerts, and customiza
 - Expandable dialog for viewing all anomalies
 
 #### Notification Service
+
 - **Types of Notifications:**
+
   - Info (blue)
   - Success (green)
   - Warning (orange)
@@ -53,26 +59,32 @@ The Volt-Guard dashboard provides real-time visualization, alerts, and customiza
 Users can customize their dashboard by toggling widgets on/off:
 
 #### Available Widgets:
+
 1. **Energy Summary Widget**
+
    - Today's total consumption
    - Cost, peak hours, average power
 
 2. **AI Predictions Widget**
+
    - Tomorrow's forecasted usage
    - Percentage change from today
    - Estimated cost
    - Predicted peak hours
 
 3. **Active Anomalies Widget**
+
    - Real-time alerts
    - Device-specific warnings
    - Severity indicators
 
 4. **Real-Time Chart Widget**
+
    - Live power consumption graph
    - Auto-updating every 30 seconds
 
 5. **Recommendations Widget**
+
    - AI-powered energy-saving tips
    - kWh savings estimates
    - Cost savings projections
@@ -83,6 +95,7 @@ Users can customize their dashboard by toggling widgets on/off:
    - Color-coded status indicators
 
 #### Customization Features:
+
 - Easy toggle switches in settings
 - Persistent preferences
 - Instant UI updates
@@ -91,6 +104,7 @@ Users can customize their dashboard by toggling widgets on/off:
 ### 4. **AI-Powered Features**
 
 #### Predictions
+
 - Tomorrow's energy usage forecast
 - Weekly and monthly forecasts
 - Peak hours prediction
@@ -98,6 +112,7 @@ Users can customize their dashboard by toggling widgets on/off:
 - Device-specific predictions
 
 #### Recommendations
+
 - Actionable energy-saving suggestions
 - kWh-backed impact estimates
 - Cost savings calculations
@@ -115,6 +130,7 @@ Users can customize their dashboard by toggling widgets on/off:
 ## Services Architecture
 
 ### Energy Service
+
 ```dart
 - getTodaySummary()
 - getRealTimeConsumption()
@@ -125,6 +141,7 @@ Users can customize their dashboard by toggling widgets on/off:
 ```
 
 ### Device Service
+
 ```dart
 - getAllDevices()
 - getRealTimeDeviceStatus()
@@ -135,6 +152,7 @@ Users can customize their dashboard by toggling widgets on/off:
 ```
 
 ### Anomaly Service
+
 ```dart
 - getActiveAnomalies()
 - getAllAnomalies()
@@ -145,6 +163,7 @@ Users can customize their dashboard by toggling widgets on/off:
 ```
 
 ### Prediction Service
+
 ```dart
 - getTomorrowPrediction()
 - getWeeklyForecast()
@@ -155,6 +174,7 @@ Users can customize their dashboard by toggling widgets on/off:
 ```
 
 ### Notification Service
+
 ```dart
 - addNotification()
 - markAsRead()
@@ -205,6 +225,7 @@ Navigator.push(
 ## Visual Indicators
 
 ### Status Colors
+
 - 🟢 **Green**: Normal operation, savings
 - 🔵 **Blue**: Information, predictions
 - 🟠 **Orange**: Warnings, medium priority
@@ -213,6 +234,7 @@ Navigator.push(
 - 🟡 **Amber**: Predictions, insights
 
 ### Device Status
+
 - 🟢 **Green dot**: Device ON/Active
 - ⚫ **Grey dot**: Device OFF/Inactive
 - 🟠 **Orange dot**: Warning state
@@ -280,6 +302,7 @@ GET /api/v1/predictions/recommendations
 ## Support
 
 For issues or questions:
+
 - Check the error message details
 - Verify backend API is running
 - Check network connectivity

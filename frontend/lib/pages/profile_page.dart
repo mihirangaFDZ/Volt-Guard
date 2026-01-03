@@ -14,7 +14,7 @@ class _ProfilePageState extends State<ProfilePage> {
   String _name = 'Sakya Institute';
   String _email = 'sakya@example.com';
   final TextEditingController _billAmountController =
-    TextEditingController(text: '1850');
+      TextEditingController(text: '1850');
   DateTime _selectedMonth =
       DateTime(DateTime.now().year, DateTime.now().month, 1);
   final List<_BillEntry> _billHistory = [
