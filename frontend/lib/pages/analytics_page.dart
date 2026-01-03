@@ -16,9 +16,13 @@ class AnalyticsPage extends StatefulWidget {
 class _AnalyticsPageState extends State<AnalyticsPage> {
   final AnalyticsService _analyticsService = AnalyticsService();
 
+  static const int _maxActiveRecs = 3;
   List<SensorReading> _readings = [];
   bool _loading = true;
   String? _error;
+  List<_RecItem> _activeRecItems = [];
+  List<_Recommendation> _backlogRecs = [];
+  List<_CompletedEntry> _history = [];
 
   @override
   void initState() {
@@ -34,9 +38,23 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       });
 
       final data = await _analyticsService.fetchLatestReadings(limit: 50);
+      _DerivedStats? stats;
+      if (data.isNotEmpty) {
+        stats = _deriveStats(data);
+      }
       if (!mounted) return;
       setState(() {
         _readings = data;
+        if (stats != null) {
+          final recs = _buildRecList(stats!);
+          _activeRecItems = recs.take(_maxActiveRecs).map((r) => _RecItem(rec: r)).toList();
+          _backlogRecs = recs.skip(_maxActiveRecs).toList();
+          _history = [];
+        } else {
+          _activeRecItems = [];
+          _backlogRecs = [];
+          _history = [];
+        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -114,7 +132,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           const SizedBox(height: 16),
           _buildSensorHealth(latest, stats),
           const SizedBox(height: 16),
-          _buildRecommendations(stats),
+          _buildRecommendations(),
           const SizedBox(height: 16),
           _buildRecentReadings(_readings),
         ],
@@ -367,8 +385,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _buildRecommendations(_DerivedStats stats) {
-    final List<_Recommendation> recs = _buildRecList(stats);
+  Widget _buildRecommendations() {
+    final List<_RecItem> recs = _activeRecItems;
     return Card(
       elevation: 2,
       child: Padding(
@@ -384,7 +402,19 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               ],
             ),
             const SizedBox(height: 12),
-            ...recs.map((rec) => _recTile(rec, () => _handleRecAction(rec))).toList(),
+            if (recs.isEmpty)
+              Text('No recommendations right now.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]))
+            else
+              ...List.generate(recs.length, (index) => _recTile(recs[index], () => _handleRecAction(index))),
+            if (_history.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Divider(color: Colors.grey[300]),
+              const SizedBox(height: 8),
+              Text('History', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.grey[800])),
+              const SizedBox(height: 8),
+              ..._history.take(5).map((entry) => _historyTile(entry)).toList(),
+            ],
           ],
         ),
       ),
@@ -417,41 +447,99 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _recTile(_Recommendation rec, VoidCallback onPressed) {
+  Widget _recTile(_RecItem item, VoidCallback onPressed) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(rec.icon, color: rec.color),
+          Icon(item.rec.icon, color: item.rec.color),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(rec.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(item.rec.title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      decoration: item.completed ? TextDecoration.lineThrough : TextDecoration.none,
+                    )),
                 const SizedBox(height: 4),
-                Text(rec.detail, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                Text(item.rec.detail,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: item.completed ? Colors.grey[500] : Colors.grey[700],
+                    )),
+                if (item.completed)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      children: const [
+                        Icon(Icons.check_circle, color: Colors.green, size: 16),
+                        SizedBox(width: 6),
+                        Text('Completed', style: TextStyle(color: Colors.green, fontSize: 12)),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
           TextButton(
             style: TextButton.styleFrom(
-              foregroundColor: rec.color,
+              foregroundColor: item.completed ? Colors.grey : item.rec.color,
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               minimumSize: const Size(64, 36),
             ),
-            onPressed: onPressed,
-            child: Text(rec.cta, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+            onPressed: item.completed ? null : onPressed,
+            child: Text(item.completed ? 'Done' : item.rec.cta,
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
     );
   }
 
-  void _handleRecAction(_Recommendation rec) {
+  Widget _historyTile(_CompletedEntry entry) {
+    final _RecItem item = entry.item;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.check_circle, color: Colors.green, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.rec.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(item.rec.detail,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                Text(_friendlyTime(entry.completedAt),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleRecAction(int index) {
+    if (index < 0 || index >= _activeRecItems.length) return;
+    final _RecItem item = _activeRecItems[index];
+    if (item.completed) return;
+
+    setState(() {
+      item.completed = true;
+      _history.insert(0, _CompletedEntry(item: item, completedAt: DateTime.now()));
+      _activeRecItems.removeAt(index);
+      _appendNextRecLocked();
+    });
+
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${rec.cta}: ${rec.title}')),
+      SnackBar(content: Text('Completed: ${item.rec.title}')),
     );
   }
 
@@ -607,6 +695,15 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       SnackBar(content: Text('Copied: $value')),
     );
   }
+
+  void _appendNextRecLocked() {
+    if (_backlogRecs.isEmpty) return;
+
+    while (_activeRecItems.length < _maxActiveRecs && _backlogRecs.isNotEmpty) {
+      final _Recommendation next = _backlogRecs.removeAt(0);
+      _activeRecItems.add(_RecItem(rec: next));
+    }
+  }
 }
 
 class _DerivedStats {
@@ -663,6 +760,20 @@ class _Recommendation {
   final String cta;
   final Color color;
   final IconData icon;
+}
+
+class _RecItem {
+  _RecItem({required this.rec, this.completed = false});
+
+  final _Recommendation rec;
+  bool completed;
+}
+
+class _CompletedEntry {
+  _CompletedEntry({required this.item, required this.completedAt});
+
+  final _RecItem item;
+  final DateTime completedAt;
 }
 
 _DerivedStats _deriveStats(List<SensorReading> readings) {
