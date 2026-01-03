@@ -1,7 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from database import devices_col
 from app.models.device_model import Device
-router = APIRouter(prefix="/devices", tags=["Devices"])
+from utils.jwt_handler import get_current_user
+
+router = APIRouter(
+    prefix="/devices",
+    tags=["Devices"],
+    dependencies=[Depends(get_current_user)],
+)
 
 @router.post("/")
 def add_device(device: Device):

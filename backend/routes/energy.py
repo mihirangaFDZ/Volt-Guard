@@ -1,8 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from database import energy_col
 from app.models.energy_model import EnergyReading
+from utils.jwt_handler import get_current_user
 
-router = APIRouter(prefix="/energy", tags=["Energy"])
+router = APIRouter(
+    prefix="/energy",
+    tags=["Energy"],
+    dependencies=[Depends(get_current_user)],
+)
 
 @router.post("/")
 def add_energy(data: EnergyReading):

@@ -1,95 +1,218 @@
 from PIL import Image, ImageDraw
 import os
 
-def create_gradient(draw, width, height, color1, color2):
-    """Create a vertical gradient"""
-    for y in range(height):
-        ratio = y / height
-        r = int(color1[0] + (color2[0] - color1[0]) * ratio)
-        g = int(color1[1] + (color2[1] - color1[1]) * ratio)
-        b = int(color1[2] + (color2[2] - color1[2]) * ratio)
-        draw.line([(0, y), (width, y)], fill=(r, g, b))
 
-# Create a 1024x1024 image
+def create_radial_gradient(size, inner_color, outer_color):
+    """Create a simple radial gradient by drawing concentric circles."""
+    img = Image.new('RGB', (size, size), outer_color)
+    draw = ImageDraw.Draw(img)
+    steps = 140
+    for i in range(steps, 0, -1):
+        t = i / steps
+        r = int(inner_color[0] * t + outer_color[0] * (1 - t))
+        g = int(inner_color[1] * t + outer_color[1] * (1 - t))
+        b = int(inner_color[2] * t + outer_color[2] * (1 - t))
+        radius = int((size / 2) * t)
+        x0 = size // 2 - radius
+        y0 = size // 2 - radius
+        x1 = size // 2 + radius
+        y1 = size // 2 + radius
+        draw.ellipse([x0, y0, x1, y1], fill=(r, g, b))
+    return img
+
+
 size = 1024
-img = Image.new('RGBA', (size, size), color=(0, 0, 0, 0))
-draw = ImageDraw.Draw(img)
 
-# Create background circle with gradient
-background = Image.new('RGB', (size, size))
-bg_draw = ImageDraw.Draw(background)
-create_gradient(bg_draw, size, size, (74, 144, 226), (37, 99, 235))
+# Eco-themed background (dark green with subtle radial highlight)
+bg = create_radial_gradient(size, inner_color=(20, 66, 47), outer_color=(13, 26, 20))
 
-# Create circular mask
+# Circular mask for a clean app icon silhouette
 mask = Image.new('L', (size, size), 0)
 mask_draw = ImageDraw.Draw(mask)
 mask_draw.ellipse([0, 0, size, size], fill=255)
-
-# Apply circular mask to background
-img = Image.composite(background, Image.new('RGB', (size, size), (255, 255, 255)), mask)
+img = Image.composite(bg, Image.new('RGB', (size, size), (13, 26, 20)), mask)
 draw = ImageDraw.Draw(img)
 
-# Draw shield shape - custom shield outline
-shield_path = [
-    (512, 150), (600, 155), (680, 170), (740, 190), (780, 210), (810, 235),
-    (820, 280), (820, 400), (820, 500), (815, 580), (800, 650), (775, 710),
-    (740, 765), (690, 815), (630, 855), (570, 885), (512, 910),
-    (454, 885), (394, 855), (334, 815), (284, 765), (249, 710), (224, 650),
-    (209, 580), (204, 500), (204, 400), (204, 280), (214, 235), (244, 210),
-    (284, 190), (344, 170), (424, 155)
+# Soft ring to add depth
+ring_margin = 70
+draw.ellipse(
+    [ring_margin, ring_margin, size - ring_margin, size - ring_margin],
+    outline=(255, 255, 255),
+    width=8,
+)
+
+# Leaf shape (simple stylized leaf using two overlapping ellipses + stem)
+leaf_center_x = 520
+leaf_center_y = 520
+leaf_w = 520
+leaf_h = 620
+leaf_color = (0, 200, 83)  # existing app green
+leaf_highlight = (150, 255, 198)
+
+# Main leaf body
+draw.ellipse(
+    [
+        leaf_center_x - leaf_w // 2,
+        leaf_center_y - leaf_h // 2,
+        leaf_center_x + leaf_w // 2,
+        leaf_center_y + leaf_h // 2,
+    ],
+    fill=leaf_color,
+)
+
+# Cutout to form a pointed leaf tip (overlay background-colored ellipse)
+draw.ellipse(
+    [
+        leaf_center_x - int(leaf_w * 0.56),
+        leaf_center_y - int(leaf_h * 0.44),
+        leaf_center_x + int(leaf_w * 0.56),
+        leaf_center_y + int(leaf_h * 0.32),
+    ],
+    fill=(13, 26, 20),
+)
+
+# Leaf highlight
+draw.ellipse(
+    [
+        leaf_center_x - int(leaf_w * 0.28),
+        leaf_center_y - int(leaf_h * 0.28),
+        leaf_center_x + int(leaf_w * 0.10),
+        leaf_center_y + int(leaf_h * 0.18),
+    ],
+    fill=leaf_highlight,
+)
+
+# Stem
+stem_w = 26
+stem_h = 200
+draw.rounded_rectangle(
+    [
+        leaf_center_x - stem_w // 2,
+        leaf_center_y + int(leaf_h * 0.12),
+        leaf_center_x + stem_w // 2,
+        leaf_center_y + int(leaf_h * 0.12) + stem_h,
+    ],
+    radius=14,
+    fill=(0, 140, 60),
+)
+
+# Bolt overlay (energy) - centered and slightly tilted look via polygon
+bolt = [
+    (520, 260),
+    (420, 520),
+    (505, 520),
+    (455, 790),
+    (660, 500),
+    (555, 500),
+    (610, 260),
 ]
-draw.polygon(shield_path, fill='#FFFFFF', outline='#1E40AF', width=10)
+draw.polygon(bolt, fill=(251, 191, 36), outline=(217, 119, 6), width=10)
 
-# Draw inner shield highlight
-shield_inner = [
-    (512, 190), (580, 195), (640, 210), (690, 230), (730, 255), (760, 290),
-    (770, 350), (770, 480), (765, 560), (750, 630), (720, 690), (680, 740),
-    (620, 790), (560, 820), (512, 840),
-    (464, 820), (404, 790), (344, 740), (304, 690), (274, 630), (259, 560),
-    (254, 480), (254, 350), (264, 290), (294, 255), (334, 230), (384, 210), (444, 195)
+# Bolt highlight
+bolt_hi = [
+    (535, 285),
+    (452, 518),
+    (520, 518),
+    (485, 725),
+    (620, 505),
+    (565, 505),
+    (610, 285),
 ]
-draw.polygon(shield_inner, fill='#F0F4FF', outline='#93C5FD', width=3)
+draw.polygon(bolt_hi, fill=(253, 230, 138))
 
-# Draw lightning bolt (more detailed)
-bolt_outer = [
-    (555, 320),
-    (465, 515),
-    (515, 515),
-    (485, 715),
-    (630, 485),
-    (560, 485),
-    (600, 320)
-]
-# Draw bolt with gradient effect (using multiple layers)
-draw.polygon(bolt_outer, fill='#FBBF24', outline='#D97706', width=8)
-
-# Draw bolt highlight
-bolt_highlight = [
-    (568, 340),
-    (490, 510),
-    (525, 510),
-    (502, 665),
-    (610, 495),
-    (572, 495),
-    (600, 340)
-]
-draw.polygon(bolt_highlight, fill='#FDE68A')
-
-# Draw energy circles with glow effect
-circles = [(400, 390), (624, 390), (400, 630), (624, 630)]
-for cx, cy in circles:
-    # Outer glow
-    draw.ellipse([cx-28, cy-28, cx+28, cy+28], fill='#FEF3C7', outline='#FCD34D', width=2)
-    # Inner circle
-    draw.ellipse([cx-18, cy-18, cx+18, cy+18], fill='#FBBF24')
-    # Highlight
-    draw.ellipse([cx-8, cy-8, cx+8, cy+8], fill='#FDE68A')
-
-# Save the image
+# Save
 output_path = os.path.join('assets', 'images', 'icon.png')
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 img.save(output_path, 'PNG', quality=100)
 print(f"✓ Icon created successfully at {output_path}")
 print(f"  Size: {size}x{size}px")
-print(f"  Ready for use with flutter_launcher_icons")
+print("  Theme: leaf + bolt (energy saving)")
+
+
+# Also create an Android adaptive foreground (transparent background, safe area)
+fg = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+fg_draw = ImageDraw.Draw(fg)
+
+# Android adaptive icons have a "safe zone"; keep artwork centered with padding
+safe = 720
+offset = (size - safe) // 2
+
+def map_point(x, y):
+    sx = offset + int(x * safe / size)
+    sy = offset + int(y * safe / size)
+    return sx, sy
+
+# Re-draw the leaf + bolt centered, but without any background
+leaf_center_x, leaf_center_y = map_point(520, 520)
+leaf_w = int(520 * safe / size)
+leaf_h = int(620 * safe / size)
+leaf_color = (0, 200, 83, 255)
+leaf_highlight = (150, 255, 198, 255)
+
+fg_draw.ellipse(
+    [
+        leaf_center_x - leaf_w // 2,
+        leaf_center_y - leaf_h // 2,
+        leaf_center_x + leaf_w // 2,
+        leaf_center_y + leaf_h // 2,
+    ],
+    fill=leaf_color,
+)
+fg_draw.ellipse(
+    [
+        leaf_center_x - int(leaf_w * 0.56),
+        leaf_center_y - int(leaf_h * 0.44),
+        leaf_center_x + int(leaf_w * 0.56),
+        leaf_center_y + int(leaf_h * 0.32),
+    ],
+    fill=(0, 0, 0, 0),
+)
+fg_draw.ellipse(
+    [
+        leaf_center_x - int(leaf_w * 0.28),
+        leaf_center_y - int(leaf_h * 0.28),
+        leaf_center_x + int(leaf_w * 0.10),
+        leaf_center_y + int(leaf_h * 0.18),
+    ],
+    fill=leaf_highlight,
+)
+
+stem_w = max(10, int(26 * safe / size))
+stem_h = int(200 * safe / size)
+fg_draw.rounded_rectangle(
+    [
+        leaf_center_x - stem_w // 2,
+        leaf_center_y + int(leaf_h * 0.12),
+        leaf_center_x + stem_w // 2,
+        leaf_center_y + int(leaf_h * 0.12) + stem_h,
+    ],
+    radius=max(8, stem_w // 2),
+    fill=(0, 140, 60, 255),
+)
+
+bolt = [
+    map_point(520, 260),
+    map_point(420, 520),
+    map_point(505, 520),
+    map_point(455, 790),
+    map_point(660, 500),
+    map_point(555, 500),
+    map_point(610, 260),
+]
+fg_draw.polygon(bolt, fill=(251, 191, 36, 255), outline=(217, 119, 6, 255), width=max(6, int(10 * safe / size)))
+
+bolt_hi = [
+    map_point(535, 285),
+    map_point(452, 518),
+    map_point(520, 518),
+    map_point(485, 725),
+    map_point(620, 505),
+    map_point(565, 505),
+    map_point(610, 285),
+]
+fg_draw.polygon(bolt_hi, fill=(253, 230, 138, 255))
+
+fg_path = os.path.join('assets', 'images', 'icon_foreground.png')
+fg.save(fg_path, 'PNG', quality=100)
+print(f"✓ Adaptive foreground created at {fg_path}")
 
