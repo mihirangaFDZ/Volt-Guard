@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:volt_guard/services/zones_service.dart';
+
 import 'zones_page.dart';
 
 /// Detailed view of a single zone with devices and scheduling
@@ -14,50 +16,44 @@ class ZoneDetailsPage extends StatefulWidget {
 class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
   late List<DeviceData> devices;
   late List<ScheduleRuleData> schedules;
+  final ZonesService _zonesService = ZonesService();
+  bool _loadingDevices = false;
+  bool _savingDevice = false;
   int _selectedTabIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    devices = _getMockDevices();
+    devices = [];
     schedules = _getMockSchedules();
+    _loadDevices();
   }
 
-  List<DeviceData> _getMockDevices() {
-    return [
-      DeviceData(
-        id: "dev_1",
-        name: "AC Unit",
-        type: "Air Conditioner",
-        power: 800,
-        status: "on",
-        energyToday: 6.4,
-      ),
-      DeviceData(
-        id: "dev_2",
-        name: "Ceiling Lights",
-        type: "Lighting",
-        power: 400,
-        status: "on",
-        energyToday: 3.2,
-      ),
-      DeviceData(
-        id: "dev_3",
-        name: "Projector",
-        type: "Equipment",
-        power: 300,
-        status: "on",
-        energyToday: 2.4,
-      ),
-      DeviceData(
-        id: "dev_4",
-        name: "PC Lab Computers",
-        type: "Computing",
-        power: 900,
-        status: "off",
-        energyToday: 0.0,
-      ),
-    ];
+  Future<void> _loadDevices() async {
+    setState(() => _loadingDevices = true);
+    try {
+      final list = await _zonesService.fetchDevicesForLocation(widget.zone.name);
+      devices = list
+          .map(
+            (d) => DeviceData(
+              id: d['device_id']?.toString() ?? 'unknown',
+              name: d['device_name']?.toString() ?? 'Unknown Device',
+              type: d['device_type']?.toString() ?? 'Unknown',
+              power: (d['rated_power_watts'] is num) ? (d['rated_power_watts'] as num).toInt() : 0,
+              status: 'on',
+              energyToday: 0,
+            ),
+          )
+          .toList();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load devices: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingDevices = false);
+    }
   }
 
   List<ScheduleRuleData> _getMockSchedules() {
@@ -407,12 +403,20 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
           ],
         ),
         const SizedBox(height: 12),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: devices.length,
-          itemBuilder: (context, index) => _buildDeviceCard(devices[index]),
-        ),
+        if (_loadingDevices)
+          const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator())),
+        if (!_loadingDevices && devices.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text("No devices found for this zone."),
+          ),
+        if (!_loadingDevices && devices.isNotEmpty)
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: devices.length,
+            itemBuilder: (context, index) => _buildDeviceCard(devices[index]),
+          ),
       ],
     );
   }
@@ -696,6 +700,12 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
   }
 
   void _showAddDeviceDialog() {
+    final nameController = TextEditingController();
+    final typeController = TextEditingController();
+    final powerController = TextEditingController();
+    final deviceIdController = TextEditingController();
+    final locationController = TextEditingController(text: widget.zone.name);
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -705,6 +715,15 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
+                controller: deviceIdController,
+                decoration: InputDecoration(
+                  labelText: "Device ID",
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nameController,
                 decoration: InputDecoration(
                   labelText: "Device Name",
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -712,6 +731,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
               ),
               const SizedBox(height: 12),
               TextField(
+                controller: typeController,
                 decoration: InputDecoration(
                   labelText: "Device Type",
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -719,11 +739,20 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
               ),
               const SizedBox(height: 12),
               TextField(
+                controller: powerController,
                 decoration: InputDecoration(
-                  labelText: "Power (W)",
+                  labelText: "Rated Power (W)",
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: locationController,
+                decoration: InputDecoration(
+                  labelText: "Location",
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
               ),
             ],
           ),
@@ -734,13 +763,57 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
             child: const Text("Cancel"),
           ),
           ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Device added successfully!")),
-              );
-            },
-            child: const Text("Add"),
+            onPressed: _savingDevice
+                ? null
+                : () async {
+                    final deviceId = deviceIdController.text.trim();
+                    final name = nameController.text.trim();
+                    final type = typeController.text.trim();
+                    final location = locationController.text.trim();
+                    final power = int.tryParse(powerController.text.trim());
+
+                    if (deviceId.isEmpty || name.isEmpty || type.isEmpty || power == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Please fill all required fields")),
+                      );
+                      return;
+                    }
+
+                    setState(() => _savingDevice = true);
+                    try {
+                      await _zonesService.addDeviceToZone(location, {
+                        "device_id": deviceId,
+                        "device_name": name,
+                        "device_type": type,
+                        "location": location,
+                        "rated_power_watts": power,
+                        "installed_date": DateTime.now().toIso8601String(),
+                      });
+
+                      if (mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("Device added successfully!")),
+                        );
+                        _loadDevices();
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Failed to add device: $e')),
+                        );
+                      }
+                    } finally {
+                      if (mounted) setState(() => _savingDevice = false);
+                    }
+                  },
+            child: _savingDevice
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Text("Add"),
           ),
         ],
       ),
