@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 
+
 class Prediction(BaseModel):
     device_id: str
     predicted_energy_kwh: float
