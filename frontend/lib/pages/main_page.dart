@@ -4,6 +4,7 @@ import 'devices_page.dart';
 import 'analytics_page.dart';
 import 'fault_detection_page.dart';
 import 'profile_page.dart';
+import 'zones_page.dart';
 
 /// Main page with bottom navigation bar for app navigation
 class MainPage extends StatefulWidget {
@@ -18,6 +19,7 @@ class _MainPageState extends State<MainPage> {
 
   final List<Widget> _pages = [
     const DashboardPage(),
+    const ZonesPage(),
     const DevicesPage(),
     const AnalyticsPage(),
     const FaultDetectionPage(),
@@ -40,6 +42,11 @@ class _MainPageState extends State<MainPage> {
             icon: Icon(Icons.dashboard_outlined),
             selectedIcon: Icon(Icons.dashboard),
             label: 'Dashboard',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.location_on_outlined),
+            selectedIcon: Icon(Icons.location_on),
+            label: 'Zones',
           ),
           NavigationDestination(
             icon: Icon(Icons.devices_outlined),
