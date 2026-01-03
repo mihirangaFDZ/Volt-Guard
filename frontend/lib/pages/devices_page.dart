@@ -177,7 +177,7 @@ class DevicesPage extends StatelessWidget {
                   ),
                 );
               },
-              activeColor: color,
+              activeThumbColor: color,
             ),
           ],
         ),

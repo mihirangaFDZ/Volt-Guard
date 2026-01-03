@@ -285,8 +285,8 @@ class DashboardPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          Row(
-            children: const [
+          const Row(
+            children: [
               Expanded(
                 child: _InfoCard(
                   title: 'Active devices',
@@ -307,8 +307,8 @@ class DashboardPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Row(
-            children: const [
+          const Row(
+            children: [
               Expanded(
                 child: _InfoCard(
                   title: 'Cost today',
@@ -331,8 +331,8 @@ class DashboardPage extends StatelessWidget {
           const SizedBox(height: 16),
           const _SectionHeader(title: 'Quick actions'),
           const SizedBox(height: 8),
-          Row(
-            children: const [
+          const Row(
+            children: [
               Expanded(
                 child: _QuickAction(
                   icon: Icons.flash_on,
