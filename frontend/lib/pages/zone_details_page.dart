@@ -32,7 +32,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
   Future<void> _loadDevices() async {
     setState(() => _loadingDevices = true);
     try {
-      final list = await _zonesService.fetchDevicesForLocation(widget.zone.name);
+      final list = await ZonesService.fetchDevicesForLocation(widget.zone.name);
       devices = list
           .map(
             (d) => DeviceData(
@@ -781,14 +781,12 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
 
                     setState(() => _savingDevice = true);
                     try {
-                      await _zonesService.addDeviceToZone(location, {
-                        "device_id": deviceId,
-                        "device_name": name,
-                        "device_type": type,
-                        "location": location,
-                        "rated_power_watts": power,
-                        "installed_date": DateTime.now().toIso8601String(),
-                      });
+                      await ZonesService.addDeviceToZone(
+                        location: location,
+                        deviceId: deviceId,
+                        deviceName: name,
+                        ratedPowerWatts: power.toDouble(),
+                      );
 
                       if (mounted) {
                         Navigator.pop(context);

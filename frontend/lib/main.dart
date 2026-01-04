@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:volt_guard/screens/login_screen.dart';
+import 'package:volt_guard/pages/zone_manager_page.dart';
 
 void main() {
   runApp(const VoltGuardApp());
@@ -40,6 +41,7 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final pages = [
       const DashboardPage(),
+      const ZoneManagerPage(),
       const AnalyticsPage(),
       const AlertsPage(),
       const DevicesPage(),
@@ -101,6 +103,11 @@ class _HomeShellState extends State<HomeShell> {
               icon: Icon(Icons.space_dashboard_outlined),
               activeIcon: Icon(Icons.space_dashboard),
               label: 'Dashboard',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.location_on_outlined),
+              activeIcon: Icon(Icons.location_on),
+              label: 'Zones',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.show_chart_outlined),
