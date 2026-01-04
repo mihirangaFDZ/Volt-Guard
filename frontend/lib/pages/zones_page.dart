@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:volt_guard/pages/zone_details_page.dart';
+import 'package:volt_guard/services/zones_service.dart';
 
 /// Smart Zone Energy Manager - Main page for zone management
 /// Perfect for managing multiple rooms/spaces in an institution
@@ -20,170 +21,29 @@ class _ZonesPageState extends State<ZonesPage> {
   bool _onlyOccupied = false;
   bool _onlyNonCompliant = false;
   String _sort = "efficiency";
+  final ZonesService _zonesService = ZonesService();
 
   @override
   void initState() {
     super.initState();
-    zones = _getMockZones();
+    zones = [];
     _loadZones();
   }
 
   Future<void> _loadZones() async {
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 500));
-    // TODO: Replace with actual API call
-    // final response = await http.get(Uri.parse('$apiBaseUrl/zones?organization_id=...');
-    setState(() => _isLoading = false);
-  }
-
-  List<ZoneData> _getMockZones() {
-    return [
-      ZoneData(
-        id: "zone_1",
-        name: "Classroom A",
-        type: "Classroom",
-        floor: 1,
-        area: 50,
-        capacity: 30,
-        currentPower: 2400, // watts
-        monthlyConsumption: 150, // kWh
-        monthlyCost: 1800, // currency units
-        monthlyBudget: 2000,
-        occupancy: "occupied",
-        deviceCount: 5,
-        isActive: true,
-        efficiencyScore: 86,
-        recommendationCompliance: 0.82,
-        savingsPlays: const [
-          "Pre-cooled to 22°C from 10:00-12:30, floated at 26°C during 12:30-15:00 peak",
-          "Lights dimmed to 60% when daylight sensor > 350 lux",
-          "AC fan-only for 15 mins after dismissal to purge heat",
-        ],
-        wasteReasons: const [
-          "Projector left on during empty lunch block on Tuesday",
-        ],
-        wasteBreakdown: const [
-          EquipmentWasteData(name: "Projector", wastedKwh: 1.2, cause: "Left on during empty slot"),
-          EquipmentWasteData(name: "Ceiling Fans", wastedKwh: 0.6, cause: "Ran at full speed with low occupancy"),
-        ],
-        baselineKwh: 170,
-        actualKwh: 150,
-        avoidedKwh: 20,
-        avoidedCost: 240,
-        carbonSavedKg: 12,
-        peakDemandKw: 2.8,
-        comfortScore: 88,
-        alerts: const ["Check projector auto-off policy"],
-      ),
-      ZoneData(
-        id: "zone_2",
-        name: "Classroom B",
-        type: "Classroom",
-        floor: 1,
-        area: 50,
-        capacity: 30,
-        currentPower: 1800,
-        monthlyConsumption: 120,
-        monthlyCost: 1440,
-        monthlyBudget: 2000,
-        occupancy: "empty",
-        deviceCount: 5,
-        isActive: true,
-        efficiencyScore: 72,
-        recommendationCompliance: 0.58,
-        savingsPlays: const [
-          "Used natural ventilation 09:00-10:00 to delay AC start",
-        ],
-        wasteReasons: const [
-          "AC stayed at 20°C while room empty for 2 hours",
-          "Lights not tied to occupancy sensor yet",
-        ],
-        wasteBreakdown: const [
-          EquipmentWasteData(name: "AC", wastedKwh: 3.4, cause: "Low setpoint while empty"),
-          EquipmentWasteData(name: "Lighting", wastedKwh: 0.9, cause: "Stayed on during vacancy"),
-        ],
-        baselineKwh: 130,
-        actualKwh: 120,
-        avoidedKwh: 10,
-        avoidedCost: 120,
-        carbonSavedKg: 6,
-        peakDemandKw: 2.2,
-        comfortScore: 80,
-        alerts: const ["Tie lights to PIR sensor", "Raise AC to 24-26°C when empty"],
-      ),
-      ZoneData(
-        id: "zone_3",
-        name: "Computer Lab",
-        type: "Lab",
-        floor: 2,
-        area: 80,
-        capacity: 40,
-        currentPower: 4200,
-        monthlyConsumption: 280,
-        monthlyCost: 3360,
-        monthlyBudget: 3500,
-        occupancy: "occupied",
-        deviceCount: 12,
-        isActive: true,
-        efficiencyScore: 64,
-        recommendationCompliance: 0.41,
-        savingsPlays: const [
-          "Staggered PC boot at 08:45 reduced inrush",
-        ],
-        wasteReasons: const [
-          "10 PCs idle at full power after 15:00",
-          "AC stayed at 21°C even with 40% occupancy",
-        ],
-        wasteBreakdown: const [
-          EquipmentWasteData(name: "PC Cluster", wastedKwh: 5.8, cause: "Idle but powered"),
-          EquipmentWasteData(name: "AC", wastedKwh: 2.6, cause: "Overcooling post-peak"),
-        ],
-        baselineKwh: 320,
-        actualKwh: 280,
-        avoidedKwh: 40,
-        avoidedCost: 480,
-        carbonSavedKg: 24,
-        peakDemandKw: 4.6,
-        comfortScore: 74,
-        alerts: const ["Auto-sleep PCs at 15:00", "Reset AC setpoint to 24°C after peak"],
-      ),
-      ZoneData(
-        id: "zone_4",
-        name: "Office Area",
-        type: "Office",
-        floor: 1,
-        area: 60,
-        capacity: 15,
-        currentPower: 1500,
-        monthlyConsumption: 90,
-        monthlyCost: 1080,
-        monthlyBudget: 1500,
-        occupancy: "occupied",
-        deviceCount: 8,
-        isActive: true,
-        efficiencyScore: 91,
-        recommendationCompliance: 0.9,
-        savingsPlays: const [
-          "Pre-cooled to 23°C at 08:30 using night-tariff chill",
-          "Setback to 26°C with ceiling fans after 14:00",
-          "Printer sleeps after 15 minutes idle",
-        ],
-        wasteReasons: const [
-          "Occasional space heater plugged in by staff",
-        ],
-        wasteBreakdown: const [
-          EquipmentWasteData(name: "Space Heater", wastedKwh: 0.8, cause: "Personal use during peak"),
-        ],
-        baselineKwh: 105,
-        actualKwh: 90,
-        avoidedKwh: 15,
-        avoidedCost: 180,
-        carbonSavedKg: 9,
-        peakDemandKw: 1.9,
-        comfortScore: 92,
-        alerts: const ["Block space-heater outlets during peak"],
-      ),
-    ];
+    try {
+      final list = await _zonesService.fetchZoneSummaries();
+      zones = list.map((e) => ZoneData.fromApi(e)).toList();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load zones: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   double get totalPowerUsage => zones.fold(0, (sum, zone) => sum + zone.currentPower);
@@ -248,35 +108,44 @@ class _ZonesPageState extends State<ZonesPage> {
           : RefreshIndicator(
               onRefresh: _loadZones,
               child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    // Summary Cards
-                    _buildSummarySection(),
-                    const SizedBox(height: 24),
-
-                    // Quick Actions
-                    _buildQuickActionsSection(),
-                    const SizedBox(height: 24),
-
-                    // Performance highlights
-                    _buildHighlightsSection(),
-                    const SizedBox(height: 24),
-
-                    // Performance command center
-                    _buildPerformanceSection(),
-                    const SizedBox(height: 24),
-
-                    // Filters and tools
-                    _buildControlBar(),
-                    const SizedBox(height: 16),
-
-                    // Zones List
-                    _buildZonesListSection(),
-                  ],
-                ),
+                child: zones.isEmpty
+                    ? _buildEmptyState()
+                    : Column(
+                        children: [
+                          _buildSummarySection(),
+                          const SizedBox(height: 24),
+                          _buildQuickActionsSection(),
+                          const SizedBox(height: 24),
+                          _buildHighlightsSection(),
+                          const SizedBox(height: 24),
+                          _buildPerformanceSection(),
+                          const SizedBox(height: 24),
+                          _buildControlBar(),
+                          const SizedBox(height: 16),
+                          _buildZonesListSection(),
+                        ],
+                      ),
               ),
             ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 80),
+      alignment: Alignment.center,
+      child: Column(
+        children: const [
+          Icon(Icons.meeting_room, size: 48, color: Colors.grey),
+          SizedBox(height: 12),
+          Text("No zones found", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          SizedBox(height: 6),
+          Text("Pull to refresh or add a zone", style: TextStyle(color: Colors.grey)),
+        ],
+      ),
     );
   }
 
@@ -968,15 +837,17 @@ class _ZonesPageState extends State<ZonesPage> {
     final peakRoom = [...zones]..sort((a, b) => b.peakDemandKw.compareTo(a.peakDemandKw));
     final peak = peakRoom.first;
 
+    final wasteEquipment = topWaste.wasteBreakdown.isNotEmpty ? topWaste.wasteBreakdown.first.name : 'equipment';
+    final wasteCause = topWaste.wasteBreakdown.isNotEmpty ? topWaste.wasteBreakdown.first.cause : 'Configure auto-off timers';
+    final wasteImpact = topWaste.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh);
+
     final recommendations = [
       {
         'priority': 'CRITICAL',
         'room': topWaste.name,
-        'action': 'Fix ${topWaste.wasteBreakdown.isNotEmpty ? topWaste.wasteBreakdown.first.name : 'equipment'}',
-        'detail': topWaste.wasteBreakdown.isNotEmpty
-            ? topWaste.wasteBreakdown.first.cause
-            : 'Configure auto-off timers',
-        'impact': '${topWaste.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh).toStringAsFixed(1)} kWh/month to save',
+        'action': 'Fix $wasteEquipment',
+        'detail': wasteCause,
+        'impact': '${wasteImpact.toStringAsFixed(1)} kWh/month to save',
         'color': const Color(0xFFE53935),
       },
       {
@@ -1479,6 +1350,42 @@ class ZoneData {
   final double peakDemandKw;
   final double comfortScore;
   final List<String> alerts;
+
+  factory ZoneData.fromApi(Map<String, dynamic> json) {
+    final loc = json['location']?.toString() ?? 'Unknown Zone';
+    final occupancyBool = json['occupancy'] == true;
+    final currentPower = (json['power_w'] is num) ? (json['power_w'] as num).toDouble() : 0.0;
+    final currentKw = currentPower / 1000.0;
+
+    return ZoneData(
+      id: json['module'] != null ? '${json['module']}_$loc' : loc,
+      name: loc,
+      type: json['module']?.toString() ?? 'Room',
+      floor: 0,
+      area: 0,
+      capacity: 0,
+      currentPower: currentPower,
+      monthlyConsumption: 0,
+      monthlyCost: 0,
+      monthlyBudget: null,
+      occupancy: occupancyBool ? "occupied" : "empty",
+      deviceCount: 0,
+      isActive: true,
+      efficiencyScore: occupancyBool ? 80 : 70,
+      recommendationCompliance: 0.85,
+      savingsPlays: const [],
+      wasteReasons: const [],
+      wasteBreakdown: const [],
+      baselineKwh: 0,
+      actualKwh: 0,
+      avoidedKwh: 0,
+      avoidedCost: 0,
+      carbonSavedKg: 0,
+      peakDemandKw: currentKw,
+      comfortScore: 0,
+      alerts: const [],
+    );
+  }
 
   ZoneData({
     required this.id,
