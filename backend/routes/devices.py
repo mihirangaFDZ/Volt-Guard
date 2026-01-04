@@ -27,8 +27,9 @@ def add_device(device: Device):
 
 
 @router.get("/")
-def get_devices():
-    return list(devices_col.find({}, {"_id": 0}))
+def get_devices(location: Optional[str] = Query(None, description="Filter devices by location")):
+    query = {"location": location} if location else {}
+    return list(devices_col.find(query, {"_id": 0}))
 
 @router.get("/{device_id}")
 def get_device(device_id: str):
