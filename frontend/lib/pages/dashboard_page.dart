@@ -85,7 +85,7 @@ class DashboardPage extends StatelessWidget {
               const SizedBox(height: 24),
 
               // Savings in Rupees
-              _buildSectionTitle(context, 'Savings (Rs)'),
+              _buildSectionTitle(context, 'Savings (LKR)'),
               const SizedBox(height: 12),
               _buildSavingsCard(context),
               const SizedBox(height: 24),
@@ -288,7 +288,7 @@ class DashboardPage extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     _buildQuickStat(
-                        'Estimated Cost', 'Rs 6.82', Icons.attach_money),
+                        'Estimated Cost', 'LKR 6.82', Icons.attach_money),
                     _buildQuickStat('Peak Hour', '7-9 PM', Icons.access_time),
                     _buildQuickStat('Avg. Power', '2.8 kW', Icons.power),
                   ],
@@ -351,8 +351,8 @@ class DashboardPage extends StatelessWidget {
 
   Widget _buildSavingsCard(BuildContext context) {
     // Demo numbers; replace with API-driven values later
-    const double baselineCost = 2200; // Rs baseline for period
-    const double currentCost = 1850; // Rs current forecast
+    const double baselineCost = 2200; // LKR baseline for period
+    const double currentCost = 1850; // LKR current forecast
     final double savings = baselineCost - currentCost;
     final double savingsPct = (savings / baselineCost) * 100;
 
@@ -442,7 +442,7 @@ class DashboardPage extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         const Text(
-                          'Rs 1,850',
+                          'LKR 1,850',
                           style: TextStyle(
                             fontSize: 32,
                             fontWeight: FontWeight.w900,
@@ -486,7 +486,7 @@ class DashboardPage extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Rs ${savings.toStringAsFixed(0)}',
+                          'LKR ${savings.toStringAsFixed(0)}',
                           style: const TextStyle(
                             fontSize: 28,
                             fontWeight: FontWeight.w900,
@@ -547,8 +547,10 @@ class DashboardPage extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _buildSavingsLabel('Baseline', 'Rs 2,200', Colors.grey[600]!),
-                  _buildSavingsLabel('Current', 'Rs 1,850', Colors.green[700]!),
+                  _buildSavingsLabel(
+                      'Baseline', 'LKR 2,200', Colors.grey[600]!),
+                  _buildSavingsLabel(
+                      'Current', 'LKR 1,850', Colors.green[700]!),
                 ],
               ),
             ],
@@ -663,7 +665,7 @@ class DashboardPage extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     const Text(
-                      '\$7.24',
+                      'LKR 2,365',
                       style: TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
@@ -912,19 +914,19 @@ class DashboardPage extends StatelessWidget {
             const SizedBox(height: 16),
             _buildSavingsInsight(
               'Reduce AC usage by 2°C',
-              'Save up to \$1.20/day',
+              'Save up to LKR 390/day',
               Icons.ac_unit,
             ),
             const Divider(height: 24),
             _buildSavingsInsight(
               'Schedule water heater to off-peak',
-              'Save up to \$0.80/day',
+              'Save up to LKR 260/day',
               Icons.water_drop,
             ),
             const Divider(height: 24),
             _buildSavingsInsight(
               'Enable smart standby mode',
-              'Save up to \$0.50/day',
+              'Save up to LKR 165/day',
               Icons.power_settings_new,
             ),
             const SizedBox(height: 16),
@@ -945,7 +947,7 @@ class DashboardPage extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    '\$2.50/day',
+                    'LKR 815/day',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 18,
