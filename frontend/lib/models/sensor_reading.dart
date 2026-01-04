@@ -34,14 +34,20 @@ class SensorReading {
   bool get occupied => rcwl == 1 || pir == 1;
 
   factory SensorReading.fromJson(Map<String, dynamic> json) {
-    DateTime parsedTimestamp = DateTime.now().toUtc();
+    // Sri Lankan timezone (UTC+5:30)
+    const Duration sriLankaOffset = Duration(hours: 5, minutes: 30);
+    
+    DateTime parsedTimestamp = DateTime.now().toUtc().add(sriLankaOffset);
     final String? tsString = json['received_at'] as String? ??
         json['receivedAt'] as String? ??
         json['timestamp'] as String?;
     if (tsString != null) {
       final DateTime? parsed = DateTime.tryParse(tsString);
       if (parsed != null) {
-        parsedTimestamp = parsed.toUtc();
+        // If the timestamp is timezone-aware, convert to Sri Lankan time
+        // If naive, assume UTC and convert to Sri Lankan time
+        DateTime utcTime = parsed.isUtc ? parsed : parsed.toUtc();
+        parsedTimestamp = utcTime.add(sriLankaOffset);
       }
     }
 

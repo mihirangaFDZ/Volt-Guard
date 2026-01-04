@@ -539,9 +539,13 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     final _RecItem item = _activeRecItems[index];
     if (item.completed) return;
 
+    // Sri Lankan timezone (UTC+5:30)
+    const Duration sriLankaOffset = Duration(hours: 5, minutes: 30);
+    final DateTime nowSriLanka = DateTime.now().toUtc().add(sriLankaOffset);
+
     setState(() {
       item.completed = true;
-      _history.insert(0, _CompletedEntry(item: item, completedAt: DateTime.now()));
+      _history.insert(0, _CompletedEntry(item: item, completedAt: nowSriLanka));
       _activeRecItems.removeAt(index);
       _appendNextRecLocked();
     });
@@ -670,7 +674,17 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   }
 
   String _friendlyTime(DateTime time) {
-    final Duration diff = DateTime.now().difference(time.toLocal());
+    // Sri Lankan timezone (UTC+5:30)
+    const Duration sriLankaOffset = Duration(hours: 5, minutes: 30);
+    
+    // Convert current time to Sri Lankan time
+    final DateTime nowSriLanka = DateTime.now().toUtc().add(sriLankaOffset);
+    
+    // Ensure time is in Sri Lankan timezone (already converted in fromJson)
+    // If time is UTC, convert it; otherwise assume it's already in Sri Lankan time
+    DateTime timeSriLanka = time.isUtc ? time.add(sriLankaOffset) : time;
+    
+    final Duration diff = nowSriLanka.difference(timeSriLanka);
     if (diff.inMinutes < 1) return 'just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
