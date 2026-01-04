@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes import devices, energy, prediction, anomalies, user_routes, analytics, zones
 from routes.auth_routes import router as auth_router
+from routes import ml_training
 
 
 import os
@@ -51,3 +52,4 @@ app.include_router(prediction.router)
 app.include_router(anomalies.router)
 app.include_router(user_routes.router)
 app.include_router(analytics.router)
+app.include_router(ml_training.router)

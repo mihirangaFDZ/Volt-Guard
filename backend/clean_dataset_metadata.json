@@ -1,0 +1,53 @@
+{
+  "created_at": "2026-01-05T02:34:22.751621",
+  "hours_back": 48,
+  "num_records": 1009,
+  "feature_columns": [
+    "current_ma",
+    "current_a",
+    "rms_a",
+    "adc_samples",
+    "vref",
+    "wifi_rssi",
+    "voltage_v",
+    "power_w",
+    "power_kwh",
+    "is_weekend",
+    "occupied",
+    "temperature",
+    "humidity",
+    "rcwl",
+    "pir",
+    "hour_sin",
+    "hour_cos",
+    "day_sin",
+    "day_cos",
+    "current_a_rolling_mean_1h",
+    "current_a_rolling_std_1h",
+    "current_a_lag_1",
+    "current_a_lag_2",
+    "power_w_rolling_mean_1h",
+    "power_w_rolling_std_1h",
+    "power_w_lag_1",
+    "power_w_lag_2",
+    "daily_power_mean",
+    "daily_power_max",
+    "daily_power_min",
+    "daily_power_std",
+    "daily_current_mean",
+    "daily_current_max",
+    "daily_occupancy_rate"
+  ],
+  "statistics": {
+    "energy": {
+      "mean_current": 0.1673005074331021,
+      "std_current": 0.09603197019682107,
+      "mean_power": 0.5520916745292368
+    },
+    "occupancy": {
+      "mean_temperature": 29.57398843930636,
+      "mean_humidity": 62.2485549132948,
+      "occupancy_rate": 0.8034682080924855
+    }
+  }
+}
