@@ -1,6 +1,7 @@
 from pathlib import Path
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
+import certifi
 import os
 from dotenv import load_dotenv
 
@@ -20,7 +21,8 @@ client = MongoClient(
     retryWrites=True,
     retryReads=True,
     maxPoolSize=10,
-    minPoolSize=1
+    minPoolSize=1,
+    tlsCAFile=certifi.where() 
 )
 db = client[os.getenv("MONGODB_DB_NAME")]
 

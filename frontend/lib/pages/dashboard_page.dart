@@ -36,6 +36,12 @@ class DashboardPage extends StatelessWidget {
               _buildTodayEnergyCard(context),
               const SizedBox(height: 24),
 
+              // Savings in Rupees
+              _buildSectionTitle(context, 'Savings (Rs)'),
+              const SizedBox(height: 12),
+              _buildSavingsCard(context),
+              const SizedBox(height: 24),
+
               // Tomorrow's Predictions
               _buildSectionTitle(context, 'Tomorrow\'s Prediction'),
               const SizedBox(height: 12),
@@ -131,7 +137,7 @@ class DashboardPage extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _buildQuickStat('Estimated Cost', '\$6.82', Colors.green),
+                _buildQuickStat('Estimated Cost', 'Rs 6.82', Colors.green),
                 Container(
                   height: 40,
                   width: 1,
@@ -174,6 +180,102 @@ class DashboardPage extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSavingsCard(BuildContext context) {
+    // Demo numbers; replace with API-driven values later
+    const double baselineCost = 2200; // Rs baseline for period
+    const double currentCost = 1850; // Rs current forecast
+    final double savings = baselineCost - currentCost;
+    final double savingsPct = (savings / baselineCost) * 100;
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.savings_outlined, color: Colors.green[700]),
+                const SizedBox(width: 8),
+                const Text(
+                  'Rupee Savings',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'Projected Spend',
+                      style: TextStyle(fontSize: 14, color: Colors.grey),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Rs 1,850',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue,
+                      ),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text(
+                      'Saved vs baseline',
+                      style: TextStyle(fontSize: 14, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Rs ${savings.toStringAsFixed(0)}',
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${savingsPct.toStringAsFixed(1)}% lower',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.green[700],
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            LinearProgressIndicator(
+              value: (currentCost / baselineCost).clamp(0, 1),
+              backgroundColor: Colors.grey[200],
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.green.shade400),
+              minHeight: 8,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Baseline: Rs 2,200  •  Forecast: Rs 1,850  •  Savings: Rs 350',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -225,7 +327,8 @@ class DashboardPage extends StatelessWidget {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Icon(Icons.trending_up, size: 16, color: Colors.red[400]),
+                        Icon(Icons.trending_up,
+                            size: 16, color: Colors.red[400]),
                         const SizedBox(width: 4),
                         Text(
                           '+6% from today',
@@ -747,4 +850,37 @@ class DashboardPage extends StatelessWidget {
   }
 }
 
-
+Widget _buildActivityCard(
+  BuildContext context,
+  String device,
+  String status,
+  IconData icon,
+  Color color,
+  String power,
+) {
+  return Card(
+    elevation: 1,
+    child: ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(icon, color: color),
+      ),
+      title: Text(
+        device,
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(status),
+      trailing: Text(
+        power,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    ),
+  );
+}

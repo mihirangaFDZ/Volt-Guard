@@ -6,6 +6,7 @@ passlib[bcrypt]
 bcrypt
 python-jose[cryptography]
 pandas
+certifi
 numpy
 scikit-learn
 tensorflow
