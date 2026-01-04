@@ -41,6 +41,60 @@ def get_available_filters():
     }
 
 
+@router.get("/occupancy-stats")
+def get_occupancy_stats(limit: int = 50, module: Optional[str] = None, location: Optional[str] = None):
+    """
+    Get occupancy statistics from occupancy_telemetry table.
+    Returns statistics about occupied vs vacant periods.
+    """
+    query = {}
+    if module:
+        query["module"] = module
+    if location:
+        query["location"] = location
+
+    cursor = (
+        analytics_col
+        .find(query, {"_id": 0})
+        .sort([
+            ("received_at", -1),
+            ("receivedAt", -1),
+            ("timestamp", -1),
+            ("_id", -1),
+        ])
+        .limit(limit)
+    )
+
+    docs = list(cursor)
+    if not docs:
+        return {
+            "total_readings": 0,
+            "occupied_count": 0,
+            "vacant_count": 0,
+            "occupied_percentage": 0.0,
+            "vacant_percentage": 0.0,
+            "is_currently_occupied": False,
+        }
+
+    # Count occupied and vacant readings
+    occupied_count = sum(1 for d in docs if d.get("pir") == 1 or d.get("rcwl") == 1)
+    vacant_count = len(docs) - occupied_count
+    total_readings = len(docs)
+    
+    # Latest reading to determine current status
+    latest = docs[0]
+    is_currently_occupied = latest.get("pir") == 1 or latest.get("rcwl") == 1
+
+    return {
+        "total_readings": total_readings,
+        "occupied_count": occupied_count,
+        "vacant_count": vacant_count,
+        "occupied_percentage": round((occupied_count / total_readings * 100), 1) if total_readings > 0 else 0.0,
+        "vacant_percentage": round((vacant_count / total_readings * 100), 1) if total_readings > 0 else 0.0,
+        "is_currently_occupied": is_currently_occupied,
+    }
+
+
 @router.get("/latest")
 def get_latest_readings(limit: int = 50, module: Optional[str] = None, location: Optional[str] = None):
     query = {}

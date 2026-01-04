@@ -30,6 +30,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   List<String> _availableLocations = [];
   List<String> _availableModules = [];
   bool _filtersLoading = false;
+  
+  // Occupancy stats
+  Map<String, dynamic>? _occupancyStats;
 
   @override
   void initState() {
@@ -71,6 +74,19 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         location: _selectedLocation,
         module: _selectedModule,
       );
+      
+      // Fetch occupancy stats
+      Map<String, dynamic>? occupancyStats;
+      try {
+        occupancyStats = await _analyticsService.fetchOccupancyStats(
+          limit: 50,
+          location: _selectedLocation,
+          module: _selectedModule,
+        );
+      } catch (e) {
+        // Ignore errors for occupancy stats
+      }
+      
       _DerivedStats? stats;
       if (data.isNotEmpty) {
         stats = _deriveStats(data);
@@ -78,6 +94,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       if (!mounted) return;
       setState(() {
         _readings = data;
+        _occupancyStats = occupancyStats;
         if (stats != null) {
           final recs = _buildRecList(stats!);
           _activeRecItems = recs.take(_maxActiveRecs).map((r) => _RecItem(rec: r)).toList();
@@ -161,8 +178,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           const SizedBox(height: 16),
           _buildHeader(latest, stats),
           const SizedBox(height: 16),
-          _buildPeopleEstimate(stats),
-          const SizedBox(height: 16),
+          if (_occupancyStats != null) ...[
+            _buildOccupancyStats(),
+            const SizedBox(height: 16),
+          ],
           _buildComfortCard(stats),
           const SizedBox(height: 16),
           _buildSensorHealth(latest, stats),
@@ -365,7 +384,6 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 _pill('Vacancy: ${stats.vacancyMinutes} min'),
                 _pill('Avg temp: ${stats.avgTemp.toStringAsFixed(1)}°C'),
                 _pill('Avg humidity: ${stats.avgHumidity.toStringAsFixed(0)}%'),
-                _pill('People: ${stats.displayPeople} • ${stats.occupancyConfidenceLabel}'),
               ],
             ),
           ],
@@ -374,7 +392,19 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _buildPeopleEstimate(_DerivedStats stats) {
+  Widget _buildOccupancyStats() {
+    if (_occupancyStats == null) {
+      return const SizedBox.shrink();
+    }
+    
+    final stats = _occupancyStats!;
+    final isOccupied = stats['is_currently_occupied'] as bool? ?? false;
+    final totalReadings = stats['total_readings'] as int? ?? 0;
+    final occupiedCount = stats['occupied_count'] as int? ?? 0;
+    final vacantCount = stats['vacant_count'] as int? ?? 0;
+    final occupiedPercentage = stats['occupied_percentage'] as double? ?? 0.0;
+    final vacantPercentage = stats['vacant_percentage'] as double? ?? 0.0;
+    
     return Card(
       elevation: 2,
       child: Padding(
@@ -384,67 +414,119 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           children: [
             Row(
               children: [
-                Icon(Icons.people, color: stats.occupancyConfidenceColor),
+                Icon(
+                  isOccupied ? Icons.sensor_occupied : Icons.sensor_door,
+                  color: isOccupied ? Colors.green : Colors.orange,
+                ),
                 const SizedBox(width: 8),
-                Text(
-                  stats.hasActualPeople ? 'People Count (reported)' : 'People Count (estimated)',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                const Text(
+                  'Occupancy Statistics',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
-                TextButton(
-                  onPressed: () => _showPeopleEstimateInfo(stats),
-                  style: TextButton.styleFrom(
-                    foregroundColor: stats.occupancyConfidenceColor,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    minimumSize: const Size(40, 36),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isOccupied ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Text(stats.occupancyConfidenceLabel,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 11,
-                      )),
+                  child: Text(
+                    isOccupied ? 'Currently Occupied' : 'Currently Vacant',
+                    style: TextStyle(
+                      color: isOccupied ? Colors.green[700] : Colors.orange[700],
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _statTile(
+                    'Occupied',
+                    '$occupiedCount',
+                    '${occupiedPercentage.toStringAsFixed(1)}%',
+                    Colors.green,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _statTile(
+                    'Vacant',
+                    '$vacantCount',
+                    '${vacantPercentage.toStringAsFixed(1)}%',
+                    Colors.orange,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             Row(
               children: [
-                Text('${stats.displayPeople}',
-                    style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold)),
+                Expanded(
+                  child: LinearProgressIndicator(
+                    value: occupiedPercentage / 100,
+                    backgroundColor: Colors.grey[200],
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+                    minHeight: 8,
+                  ),
+                ),
                 const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (stats.hasActualPeople)
-                      Text('Reported by sensor payload',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[700]))
-                    else ...[
-                      Text('Based on last ${stats.motionWindow} readings',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[700])),
-                      Text('${stats.motionHits} motion hits (PIR/RCWL)',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[700])),
-                    ],
-                  ],
+                Expanded(
+                  child: LinearProgressIndicator(
+                    value: vacantPercentage / 100,
+                    backgroundColor: Colors.grey[200],
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                    minHeight: 8,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            if (!stats.hasActualPeople)
-              Text(
-                'Note: PIR/RCWL are binary presence sensors; count is inferred (0 or 1) from recent motion intensity.',
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-              ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: _loadReadings,
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Refresh now'),
-              ),
-            )
+            Text(
+              'Based on last $totalReadings readings',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
           ],
         ),
+      ),
+    );
+  }
+  
+  Widget _statTile(String label, String count, String percentage, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(fontSize: 12, color: Colors.grey[700], fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                count,
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                percentage,
+                style: TextStyle(fontSize: 14, color: color, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -824,27 +906,6 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     return '${diff.inDays}d ago';
   }
 
-  void _showPeopleEstimateInfo(_DerivedStats stats) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('People Count Method'),
-          content: Text(
-            stats.hasActualPeople
-                ? 'This room is reporting a people count directly in the payload. Showing the reported value.'
-                : 'Uses PIR/RCWL motion hits over the last ${stats.motionWindow} readings; motion hits: ${stats.motionHits}; confidence: ${stats.occupancyConfidenceLabel}.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
-    );
-  }
 
   void _handleCopy(String value) {
     Clipboard.setData(ClipboardData(text: value));
@@ -877,13 +938,6 @@ class _DerivedStats {
     required this.humidityStatusColor,
     required this.comfortNote,
     required this.tempBandProgress,
-    required this.estimatedPeople,
-    required this.displayPeople,
-    required this.hasActualPeople,
-    required this.motionHits,
-    required this.motionWindow,
-    required this.occupancyConfidenceLabel,
-    required this.occupancyConfidenceColor,
   });
 
   final double avgTemp;
@@ -898,13 +952,6 @@ class _DerivedStats {
   final Color humidityStatusColor;
   final String comfortNote;
   final double tempBandProgress;
-  final int estimatedPeople;
-  final int displayPeople;
-  final bool hasActualPeople;
-  final int motionHits;
-  final int motionWindow;
-  final String occupancyConfidenceLabel;
-  final Color occupancyConfidenceColor;
 }
 
 class _Recommendation {
@@ -976,33 +1023,6 @@ _DerivedStats _deriveStats(List<SensorReading> readings) {
           ? 'Cooler than typical. Check setpoint.'
           : 'Within comfort band.';
 
-  // Estimate people count (binary sensors -> inferred 0/1) using recent motion hits.
-  const int windowSize = 10;
-  final List<SensorReading> window = sorted.reversed.take(windowSize).toList();
-  final int motionHits = window.where((r) => r.occupied).length;
-  final int motionWindow = window.length;
-  final int estimatedPeople = motionHits > 0 ? 1 : 0;
-  final double confidence = motionWindow == 0 ? 0 : motionHits / motionWindow;
-
-  final int? actualPeople = latest.peopleCount;
-  final int displayPeople = ((actualPeople ?? estimatedPeople).clamp(0, 500)).toInt();
-  final bool hasActualPeople = actualPeople != null;
-  final String occupancyConfidenceLabel;
-  final Color occupancyConfidenceColor;
-  if (hasActualPeople) {
-    occupancyConfidenceLabel = 'Reported';
-    occupancyConfidenceColor = Colors.blueGrey;
-  } else if (confidence >= 0.7) {
-    occupancyConfidenceLabel = 'High confidence';
-    occupancyConfidenceColor = Colors.green;
-  } else if (confidence >= 0.4) {
-    occupancyConfidenceLabel = 'Medium confidence';
-    occupancyConfidenceColor = Colors.amber;
-  } else {
-    occupancyConfidenceLabel = 'Low confidence';
-    occupancyConfidenceColor = Colors.red;
-  }
-
   return _DerivedStats(
     avgTemp: avgTemp,
     avgHumidity: avgHumidity,
@@ -1016,13 +1036,6 @@ _DerivedStats _deriveStats(List<SensorReading> readings) {
     humidityStatusColor: humidityColor,
     comfortNote: comfortNote,
     tempBandProgress: tempBandProgress,
-    estimatedPeople: estimatedPeople,
-    displayPeople: displayPeople,
-    hasActualPeople: hasActualPeople,
-    motionHits: motionHits,
-    motionWindow: motionWindow,
-    occupancyConfidenceLabel: occupancyConfidenceLabel,
-    occupancyConfidenceColor: occupancyConfidenceColor,
   );
 }
 

@@ -66,4 +66,35 @@ class AnalyticsService {
 
     throw Exception('Failed to load filters (${response.statusCode})');
   }
+
+  Future<Map<String, dynamic>> fetchOccupancyStats({
+    int limit = 50,
+    String? module,
+    String? location,
+  }) async {
+    final headers = await _authService.getAuthHeaders();
+    headers['Accept'] = 'application/json';
+
+    final query = <String, String>{'limit': '$limit'};
+    if (module != null && module.isNotEmpty) {
+      query['module'] = module;
+    }
+    if (location != null && location.isNotEmpty) {
+      query['location'] = location;
+    }
+
+    final uri = Uri.parse('${ApiConfig.baseUrl}${ApiConfig.analyticsEndpoint}/occupancy-stats')
+        .replace(queryParameters: query);
+
+    final response = await http
+        .get(uri, headers: headers)
+        .timeout(ApiConfig.requestTimeout);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data;
+    }
+
+    throw Exception('Failed to load occupancy stats (${response.statusCode})');
+  }
 }
