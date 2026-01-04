@@ -23,11 +23,40 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   List<_RecItem> _activeRecItems = [];
   List<_Recommendation> _backlogRecs = [];
   List<_CompletedEntry> _history = [];
+  
+  // Filter state
+  String? _selectedLocation;
+  String? _selectedModule;
+  List<String> _availableLocations = [];
+  List<String> _availableModules = [];
+  bool _filtersLoading = false;
 
   @override
   void initState() {
     super.initState();
+    _loadFilters();
     _loadReadings();
+  }
+
+  Future<void> _loadFilters() async {
+    try {
+      setState(() {
+        _filtersLoading = true;
+      });
+      final filters = await _analyticsService.fetchAvailableFilters();
+      if (!mounted) return;
+      setState(() {
+        _availableLocations = filters['locations'] ?? [];
+        _availableModules = filters['modules'] ?? [];
+        _filtersLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _filtersLoading = false;
+      });
+      // Don't show error for filters, just continue without them
+    }
   }
 
   Future<void> _loadReadings() async {
@@ -37,7 +66,11 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         _error = null;
       });
 
-      final data = await _analyticsService.fetchLatestReadings(limit: 50);
+      final data = await _analyticsService.fetchLatestReadings(
+        limit: 50,
+        location: _selectedLocation,
+        module: _selectedModule,
+      );
       _DerivedStats? stats;
       if (data.isNotEmpty) {
         stats = _deriveStats(data);
@@ -124,6 +157,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildFilters(),
+          const SizedBox(height: 16),
           _buildHeader(latest, stats),
           const SizedBox(height: 16),
           _buildPeopleEstimate(stats),
@@ -190,6 +225,104 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 'No sensor readings yet. Pull to refresh or wait for devices to send data.',
                 style: TextStyle(fontSize: 13),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilters() {
+    final bool hasActiveFilters = _selectedLocation != null || _selectedModule != null;
+    
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.filter_list, color: Colors.blue),
+                const SizedBox(width: 8),
+                const Text(
+                  'Filters',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                if (hasActiveFilters)
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _selectedLocation = null;
+                        _selectedModule = null;
+                      });
+                      _loadReadings();
+                    },
+                    icon: const Icon(Icons.clear, size: 18),
+                    label: const Text('Clear'),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _selectedLocation,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Location',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                isDense: true,
+              ),
+              items: [
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text('All Locations'),
+                ),
+                ..._availableLocations.map((location) => DropdownMenuItem<String>(
+                      value: location,
+                      child: Text(location, overflow: TextOverflow.ellipsis),
+                    )),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _selectedLocation = value;
+                });
+                _loadReadings();
+              },
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _selectedModule,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Module ID',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                isDense: true,
+              ),
+              items: [
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text('All Modules'),
+                ),
+                ..._availableModules.map((module) => DropdownMenuItem<String>(
+                      value: module,
+                      child: Text(module, overflow: TextOverflow.ellipsis),
+                    )),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _selectedModule = value;
+                });
+                _loadReadings();
+              },
             ),
           ],
         ),

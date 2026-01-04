@@ -41,4 +41,29 @@ class AnalyticsService {
 
     throw Exception('Failed to load analytics (${response.statusCode})');
   }
+
+  Future<Map<String, List<String>>> fetchAvailableFilters() async {
+    final headers = await _authService.getAuthHeaders();
+    headers['Accept'] = 'application/json';
+
+    final uri = Uri.parse('${ApiConfig.baseUrl}${ApiConfig.analyticsEndpoint}/filters');
+
+    final response = await http
+        .get(uri, headers: headers)
+        .timeout(ApiConfig.requestTimeout);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;
+      return {
+        'locations': (data['locations'] as List<dynamic>)
+            .map((e) => e.toString())
+            .toList(),
+        'modules': (data['modules'] as List<dynamic>)
+            .map((e) => e.toString())
+            .toList(),
+      };
+    }
+
+    throw Exception('Failed to load filters (${response.statusCode})');
+  }
 }

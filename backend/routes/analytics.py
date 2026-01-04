@@ -19,6 +19,28 @@ router = APIRouter(
 SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
 
 
+@router.get("/filters")
+def get_available_filters():
+    """
+    Get available locations and modules from occupancy_telemetry table.
+    Returns distinct values for filtering.
+    """
+    # Get distinct locations
+    locations = analytics_col.distinct("location")
+    locations = [loc for loc in locations if loc]  # Filter out None/empty values
+    locations.sort()
+    
+    # Get distinct modules
+    modules = analytics_col.distinct("module")
+    modules = [mod for mod in modules if mod]  # Filter out None/empty values
+    modules.sort()
+    
+    return {
+        "locations": locations,
+        "modules": modules
+    }
+
+
 @router.get("/latest")
 def get_latest_readings(limit: int = 50, module: Optional[str] = None, location: Optional[str] = None):
     query = {}
