@@ -123,7 +123,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Occupancy & Comfort Analytics'),
+        title: const Text('Analytics & Recommendations'),
       ),
       body: RefreshIndicator(
         onRefresh: _loadReadings,
@@ -599,7 +599,6 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 _healthTile('RSSI', '${latest.rssi ?? -80} dBm', stats.signalColor, stats.signalLabel),
                 _healthTile('Uptime', latest.uptime != null ? '${latest.uptime}s' : 'n/a', Colors.indigo, 'since boot'),
                 _healthTile('Heap', latest.heap != null ? '${latest.heap} B' : 'n/a', Colors.teal, 'free mem'),
-                _healthTile('IP', latest.ip ?? 'n/a', Colors.grey, 'module'),
               ],
             ),
           ],
