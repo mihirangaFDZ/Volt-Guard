@@ -10,6 +10,35 @@ import 'auth_service.dart';
 class ZonesService {
   final AuthService _authService = AuthService();
 
+  /// Fetch consolidated zone summaries (one row per location)
+  Future<List<Map<String, dynamic>>> fetchZoneSummaries({String? module}) async {
+    final headers = await _authService.getAuthHeaders();
+    final query = module != null ? '?module=${Uri.encodeComponent(module)}' : '';
+    final uri = Uri.parse('${ApiConfig.baseUrl}/zones$query');
+
+    final response = await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as List<dynamic>;
+      return data.cast<Map<String, dynamic>>();
+    }
+    throw Exception('Failed to load zones (status ${response.statusCode})');
+  }
+
+  /// Fetch detailed telemetry for a specific location/zone
+  Future<Map<String, dynamic>> fetchZoneDetail(String location, {int limit = 50, String? module}) async {
+    final headers = await _authService.getAuthHeaders();
+    final params = <String, String>{'limit': limit.toString()};
+    if (module != null) params['module'] = module;
+    final uri = Uri.parse('${ApiConfig.baseUrl}/zones/${Uri.encodeComponent(location)}').replace(queryParameters: params);
+
+    final response = await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data;
+    }
+    throw Exception('Failed to load zone detail for $location (status ${response.statusCode})');
+  }
+
   /// Fetch devices for a specific location/zone
   Future<List<Map<String, dynamic>>> fetchDevicesForLocation(String location) async {
     final headers = await _authService.getAuthHeaders();
