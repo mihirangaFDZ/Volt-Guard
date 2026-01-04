@@ -173,7 +173,7 @@ class _ZonesPageState extends State<ZonesPage> {
               child: _buildStatCard(
                 icon: Icons.attach_money,
                 title: "Monthly Cost",
-                value: "₹${totalMonthlyCost.toStringAsFixed(0)}",
+                value: "LKR ${totalMonthlyCost.toStringAsFixed(0)}",
                 color: const Color(0xFF00C853),
               ),
             ),
@@ -603,7 +603,7 @@ class _ZonesPageState extends State<ZonesPage> {
           const SizedBox(height: 10),
           _buildEventCard(
             "📊 System Total",
-            "${zones.length} rooms monitored • ${(totalPowerUsage / 1000).toStringAsFixed(2)} kW current load • ₹${totalMonthlyCost.toStringAsFixed(0)} monthly cost",
+            "${zones.length} rooms monitored • ${(totalPowerUsage / 1000).toStringAsFixed(2)} kW current load • LKR ${totalMonthlyCost.toStringAsFixed(0)} monthly cost",
             const Color(0xFF9C27B0),
           ),
         ],
@@ -1181,7 +1181,7 @@ class _ZonesPageState extends State<ZonesPage> {
               children: [
                 _buildMetric("Power", "${(zone.currentPower / 1000).toStringAsFixed(1)} kW"),
                 _buildMetric("Consumption", "${zone.monthlyConsumption.toStringAsFixed(0)} kWh"),
-                _buildMetric("Cost", "₹${zone.monthlyCost.toStringAsFixed(0)}"),
+                _buildMetric("Cost", "LKR ${zone.monthlyCost.toStringAsFixed(0)}"),
                 _buildMetric("Devices", "${zone.deviceCount}"),
               ],
             ),
@@ -1196,7 +1196,7 @@ class _ZonesPageState extends State<ZonesPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        "Budget: ₹${zone.monthlyBudget!.toStringAsFixed(0)}",
+                        "Budget: LKR ${zone.monthlyBudget!.toStringAsFixed(0)}",
                         style: const TextStyle(fontSize: 12),
                       ),
                       Text(
@@ -1294,7 +1294,7 @@ class _ZonesPageState extends State<ZonesPage> {
               const SizedBox(height: 12),
               TextField(
                 decoration: InputDecoration(
-                  labelText: "Monthly Budget (₹)",
+                  labelText: "Monthly Budget (LKR)",
                   hintText: "e.g., 2000",
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),

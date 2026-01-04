@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:volt_guard/services/zones_service.dart';
+import 'package:volt_guard/services/energy_service.dart';
 
 import 'zones_page.dart';
 
@@ -15,6 +16,8 @@ class ZoneDetailsPage extends StatefulWidget {
 
 class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
   late List<DeviceData> devices;
+  Map<String, Map<String, dynamic>> _energyByLocation = {};
+  double _zoneLiveCurrent = 0.0;
   late List<ScheduleRuleData> schedules;
   final ZonesService _zonesService = ZonesService();
   bool _loadingDevices = false;
@@ -33,18 +36,47 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
     setState(() => _loadingDevices = true);
     try {
       final list = await _zonesService.fetchDevicesForLocation(widget.zone.name);
-      devices = list
-          .map(
-            (d) => DeviceData(
-              id: d['device_id']?.toString() ?? 'unknown',
-              name: d['device_name']?.toString() ?? 'Unknown Device',
-              type: d['device_type']?.toString() ?? 'Unknown',
-              power: (d['rated_power_watts'] is num) ? (d['rated_power_watts'] as num).toInt() : 0,
-              status: 'on',
-              energyToday: 0,
-            ),
-          )
-          .toList();
+
+      // Fetch latest energy for this location and map by location + device hints
+      final energyList = await EnergyService.getEnergyReadings(location: widget.zone.name, limit: 50);
+      _energyByLocation = {
+        for (final e in energyList)
+          if (e is Map<String, dynamic> && e['location'] != null)
+            e['location'].toString(): e as Map<String, dynamic>
+      };
+
+      devices = list.map((d) {
+        final deviceId = d['device_id']?.toString() ?? 'unknown';
+        final deviceName = d['device_name']?.toString() ?? 'Unknown Device';
+        final deviceType = d['device_type']?.toString() ?? 'Unknown';
+        final power = (d['rated_power_watts'] is num) ? (d['rated_power_watts'] as num).toInt() : 0;
+
+        // Match energy by location (since backend groups by location) and fallback to deviceId/name keys if present
+        Map<String, dynamic>? energy = _energyByLocation[widget.zone.name];
+        energy ??= _energyByLocation[deviceId];
+        energy ??= _energyByLocation[deviceName];
+
+        final currentA = (energy != null && energy['current_a'] is num) ? (energy['current_a'] as num).toDouble() : 0.0;
+        final voltage = (energy != null && energy['voltage'] is num) ? (energy['voltage'] as num).toDouble() : 230.0;
+        final powerW = currentA * voltage;
+        // Approximate live kWh over 1 hour window (better than zero, still labeled as live est.)
+        final energyToday = powerW / 1000.0;
+        final lastSeen = energy != null ? (energy['received_at'] ?? energy['receivedAt'] ?? energy['timestamp']) : null;
+
+        return DeviceData(
+          id: deviceId,
+          name: deviceName,
+          type: deviceType,
+          power: power,
+          status: 'on',
+          energyToday: energyToday,
+          liveCurrentA: currentA,
+          lastEnergyTs: lastSeen?.toString(),
+        );
+      }).toList();
+
+      // Sum live current for the zone
+      _zoneLiveCurrent = devices.fold(0.0, (sum, d) => sum + (d.liveCurrentA ?? 0.0));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -82,7 +114,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
   }
 
   double get totalEnergy => devices.fold(0, (sum, d) => sum + d.energyToday);
-  double get estimatedCost => totalEnergy * 12; // Assuming ₹12 per kWh
+  double get estimatedCost => totalEnergy * 12; // Assuming LKR 12 per kWh
 
   @override
   Widget build(BuildContext context) {
@@ -307,7 +339,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                   const Icon(Icons.attach_money, color: Color(0xFF00C853), size: 28),
                   const SizedBox(height: 8),
                   Text(
-                    "₹${estimatedCost.toStringAsFixed(0)}",
+                    "LKR ${estimatedCost.toStringAsFixed(0)}",
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -316,6 +348,29 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                   const SizedBox(height: 4),
                   Text(
                     "Estimated Cost",
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+              Container(
+                height: 50,
+                width: 1,
+                color: Colors.grey[200],
+              ),
+              Column(
+                children: [
+                  const Icon(Icons.electric_bolt, color: Color(0xFF42A5F5), size: 28),
+                  const SizedBox(height: 8),
+                  Text(
+                    "${_zoneLiveCurrent.toStringAsFixed(2)} A",
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Live Current",
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
                 ],
@@ -458,6 +513,17 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                   "${device.type} • ${device.power}W",
                   style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                 ),
+                const SizedBox(height: 4),
+                if (device.liveCurrentA != null)
+                  Text(
+                    "Live: ${device.liveCurrentA!.toStringAsFixed(2)} A",
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF1565C0)),
+                  ),
+                if (device.lastEnergyTs != null)
+                  Text(
+                    "Updated: ${device.lastEnergyTs}",
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  ),
               ],
             ),
           ),
@@ -485,7 +551,14 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
               ),
               const SizedBox(height: 4),
               Text(
-                "${device.energyToday.toStringAsFixed(1)} kWh",
+                "${device.energyToday.toStringAsFixed(2)} kWh est.",
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey[600],
+                ),
+              ),
+              Text(
+                "~${(device.energyToday * 30).toStringAsFixed(1)} kWh/mo",
                 style: TextStyle(
                   fontSize: 11,
                   color: Colors.grey[600],
@@ -666,7 +739,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                 "${widget.zone.monthlyConsumption.toStringAsFixed(0)} kWh",
               ),
               const Divider(),
-              _buildAnalyticRow("Monthly Cost", "₹${widget.zone.monthlyCost.toStringAsFixed(0)}"),
+              _buildAnalyticRow("Monthly Cost", "LKR ${widget.zone.monthlyCost.toStringAsFixed(0)}"),
               const Divider(),
               if (widget.zone.monthlyBudget != null) ...[
                 _buildAnalyticRow(
@@ -912,6 +985,8 @@ class DeviceData {
   final int power;
   final String status;
   final double energyToday;
+  final double? liveCurrentA;
+  final String? lastEnergyTs;
 
   DeviceData({
     required this.id,
@@ -920,6 +995,8 @@ class DeviceData {
     required this.power,
     required this.status,
     required this.energyToday,
+    this.liveCurrentA,
+    this.lastEnergyTs,
   });
 }
 
