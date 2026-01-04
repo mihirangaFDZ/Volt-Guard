@@ -4,6 +4,7 @@ class SensorReading {
     required this.location,
     required this.rcwl,
     required this.pir,
+    this.peopleCount,
     required this.temperature,
     required this.humidity,
     required this.receivedAt,
@@ -19,6 +20,7 @@ class SensorReading {
   final String location;
   final int rcwl;
   final int pir;
+  final int? peopleCount;
   final double temperature;
   final double humidity;
   final DateTime receivedAt;
@@ -32,14 +34,20 @@ class SensorReading {
   bool get occupied => rcwl == 1 || pir == 1;
 
   factory SensorReading.fromJson(Map<String, dynamic> json) {
-    DateTime parsedTimestamp = DateTime.now().toUtc();
+    // Sri Lankan timezone (UTC+5:30)
+    const Duration sriLankaOffset = Duration(hours: 5, minutes: 30);
+    
+    DateTime parsedTimestamp = DateTime.now().toUtc().add(sriLankaOffset);
     final String? tsString = json['received_at'] as String? ??
         json['receivedAt'] as String? ??
         json['timestamp'] as String?;
     if (tsString != null) {
       final DateTime? parsed = DateTime.tryParse(tsString);
       if (parsed != null) {
-        parsedTimestamp = parsed.toUtc();
+        // If the timestamp is timezone-aware, convert to Sri Lankan time
+        // If naive, assume UTC and convert to Sri Lankan time
+        DateTime utcTime = parsed.isUtc ? parsed : parsed.toUtc();
+        parsedTimestamp = utcTime.add(sriLankaOffset);
       }
     }
 
@@ -48,6 +56,9 @@ class SensorReading {
       location: (json['location'] ?? '').toString(),
       rcwl: (json['rcwl'] as num?)?.toInt() ?? 0,
       pir: (json['pir'] as num?)?.toInt() ?? 0,
+      peopleCount: (json['people_count'] as num?)?.toInt() ??
+          (json['people'] as num?)?.toInt() ??
+          (json['count'] as num?)?.toInt(),
       temperature: (json['temperature'] as num?)?.toDouble() ?? 0,
       humidity: (json['humidity'] as num?)?.toDouble() ?? 0,
       receivedAt: parsedTimestamp,
