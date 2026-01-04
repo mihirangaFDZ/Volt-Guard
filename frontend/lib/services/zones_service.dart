@@ -57,6 +57,7 @@ class ZonesService {
     required String deviceId,
     required String deviceName,
     required double ratedPowerWatts,
+    String deviceType = 'energy_sensor',
   }) async {
     final headers = await _authService.getAuthHeaders();
     final uri = Uri.parse(
@@ -66,8 +67,9 @@ class ZonesService {
     final payload = {
       'device_id': deviceId,
       'device_name': deviceName,
+      'device_type': deviceType,
       'location': location,
-      'rated_power_watts': ratedPowerWatts,
+      'rated_power_watts': ratedPowerWatts.toInt(),
       'installed_date': DateTime.now().toIso8601String().split('T').first,
     };
 

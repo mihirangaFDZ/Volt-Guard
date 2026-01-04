@@ -27,7 +27,19 @@ class _ZoneManagerPageState extends State<ZoneManagerPage> {
   int _peopleEstimate(Map<String, dynamic> zone) {
     // Basic presence estimate: if any motion flag is 1, treat as 1 person; otherwise 0.
     final hasMotion = (zone['rcwl'] ?? 0) == 1 || (zone['pir'] ?? 0) == 1 || (zone['occupancy'] ?? false) == true;
+    // If either env reading is missing/invalid (<=0 or null), treat as empty to avoid false positives.
+    final temp = _sanitizeEnv(zone['temperature'] as num?);
+    final hum = _sanitizeEnv(zone['humidity'] as num?);
+    final envValid = temp != null && hum != null;
+    if (!envValid) return 0;
     return hasMotion ? 1 : 0;
+  }
+
+  num? _sanitizeEnv(num? value) {
+    if (value == null) return null;
+    // Treat zeros or negative readings as missing.
+    if (value <= 0) return null;
+    return value;
   }
 
   double? _avgTemp(List<dynamic> zones) {
@@ -182,8 +194,8 @@ class _ZoneManagerPageState extends State<ZoneManagerPage> {
     final occupancy = zone['occupancy'] ?? false;
     final rcwl = zone['rcwl'] ?? 0;
     final pir = zone['pir'] ?? 0;
-    final temperature = zone['temperature'];
-    final humidity = zone['humidity'];
+    final temperature = _sanitizeEnv(zone['temperature'] as num?);
+    final humidity = _sanitizeEnv(zone['humidity'] as num?);
     final lastSeen = zone['last_seen'];
     final people = _peopleEstimate(zone);
 
@@ -604,9 +616,20 @@ class ZoneDetailPage extends StatefulWidget {
 class _ZoneDetailPageState extends State<ZoneDetailPage> {
   late Future<Map<String, dynamic>> _detailFuture;
   late Future<List<dynamic>> _energyReadingsFuture;
+  late Future<List<Map<String, dynamic>>> _devicesFuture;
+
+  num? _sanitizeEnv(num? value) {
+    if (value == null) return null;
+    if (value <= 0) return null;
+    return value;
+  }
 
   int _peopleEstimate(Map<String, dynamic> zone) {
     final hasMotion = (zone['rcwl'] ?? 0) == 1 || (zone['pir'] ?? 0) == 1 || (zone['occupancy'] ?? false) == true;
+    final temp = _sanitizeEnv(zone['temperature'] as num?);
+    final hum = _sanitizeEnv(zone['humidity'] as num?);
+    final envValid = temp != null && hum != null;
+    if (!envValid) return 0;
     return hasMotion ? 1 : 0;
   }
 
@@ -621,6 +644,7 @@ class _ZoneDetailPageState extends State<ZoneDetailPage> {
     setState(() {
       _detailFuture = ZonesService.fetchZoneDetail(location);
       _energyReadingsFuture = EnergyService.getEnergyReadings(location: location);
+      _devicesFuture = ZonesService.fetchDevicesForLocation(location);
     });
   }
 
@@ -642,6 +666,10 @@ class _ZoneDetailPageState extends State<ZoneDetailPage> {
             children: [
               // Current Status
               _buildCurrentStatus(),
+              const SizedBox(height: 24),
+
+              // Devices in this room
+              _buildDevicesSection(),
               const SizedBox(height: 24),
 
               // Energy Consumption
@@ -683,6 +711,8 @@ class _ZoneDetailPageState extends State<ZoneDetailPage> {
                 final detail = snapshot.data ?? {};
                 final latest = detail['latest'] as Map<String, dynamic>? ?? {};
                 final people = _peopleEstimate(latest);
+                final temp = _sanitizeEnv(latest['temperature'] as num?);
+                final hum = _sanitizeEnv(latest['humidity'] as num?);
 
                 return Column(
                   children: [
@@ -699,16 +729,16 @@ class _ZoneDetailPageState extends State<ZoneDetailPage> {
                       (latest['pir'] ?? 0) == 1 ? Colors.red : Colors.green),
                     const SizedBox(height: 8),
                     _buildStatusRow('People (est.)', '$people', Colors.indigo),
-                    if (latest['temperature'] != null) ...[
+                    if (temp != null) ...[
                       const SizedBox(height: 8),
                       _buildStatusRow('Temperature', 
-                        '${(latest['temperature'] as num).toStringAsFixed(1)}°C',
+                        '${temp.toStringAsFixed(1)}°C',
                         Colors.orange),
                     ],
-                    if (latest['humidity'] != null) ...[
+                    if (hum != null) ...[
                       const SizedBox(height: 8),
                       _buildStatusRow('Humidity', 
-                        '${(latest['humidity'] as num).toStringAsFixed(1)}%',
+                        '${hum.toStringAsFixed(1)}%',
                         Colors.blue),
                     ],
                   ],
@@ -743,6 +773,201 @@ class _ZoneDetailPageState extends State<ZoneDetailPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildDevicesSection() {
+    final location = widget.zone['location'] ?? '';
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Devices',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                TextButton.icon(
+                  onPressed: _showAddDeviceSheet,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<List<Map<String, dynamic>>>(
+              future: _devicesFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const CircularProgressIndicator();
+                }
+                if (snapshot.hasError) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Error: ${snapshot.error}'),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: _refreshDevices,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  );
+                }
+
+                final devices = snapshot.data ?? [];
+                if (devices.isEmpty) {
+                  return const Text('No devices yet for this room');
+                }
+
+                return Column(
+                  children: devices.map((d) {
+                    final device = d;
+                    final power = device['rated_power_watts'];
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey[300]!),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                device['device_name'] ?? device['device_id'] ?? 'Device',
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                device['device_type'] ?? 'Unknown type',
+                                style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            power != null ? '${power} W' : 'N/A',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _refreshDevices() async {
+    final location = widget.zone['location'] ?? '';
+    setState(() {
+      _devicesFuture = ZonesService.fetchDevicesForLocation(location);
+    });
+  }
+
+  void _showAddDeviceSheet() {
+    final rootContext = context;
+    final location = widget.zone['location']?.toString() ?? '';
+    final idController = TextEditingController();
+    final nameController = TextEditingController();
+    final typeController = TextEditingController(text: 'energy_sensor');
+    final powerController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (modalContext) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: MediaQuery.of(modalContext).viewInsets.bottom + 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Add device to $location', style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: idController,
+                decoration: const InputDecoration(labelText: 'Device ID (e.g., MOD001)'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Device Name'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: typeController,
+                decoration: const InputDecoration(labelText: 'Device Type'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: powerController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Rated Power (W)'),
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    final id = idController.text.trim();
+                    final name = nameController.text.trim();
+                    final dtype = typeController.text.trim().isEmpty ? 'energy_sensor' : typeController.text.trim();
+                    final rated = double.tryParse(powerController.text.trim());
+
+                    if (id.isEmpty || name.isEmpty || rated == null) {
+                      ScaffoldMessenger.of(rootContext).showSnackBar(
+                        const SnackBar(content: Text('Fill all fields with valid values')),
+                      );
+                      return;
+                    }
+
+                    try {
+                      await ZonesService.addDeviceToZone(
+                        location: location,
+                        deviceId: id,
+                        deviceName: name,
+                        ratedPowerWatts: rated,
+                        deviceType: dtype,
+                      );
+                      if (!mounted) return;
+                      Navigator.of(modalContext).pop();
+                      ScaffoldMessenger.of(rootContext).showSnackBar(
+                        const SnackBar(content: Text('Device added')),
+                      );
+                      await _refreshDevices();
+                    } catch (e) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(rootContext).showSnackBar(
+                        SnackBar(content: Text('Error: $e')),
+                      );
+                    }
+                  },
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -1001,6 +1226,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
   final _deviceIdController = TextEditingController();
   final _deviceNameController = TextEditingController();
   final _ratedPowerController = TextEditingController();
+  final _deviceTypeController = TextEditingController(text: 'energy_sensor');
   bool _isLoading = false;
 
   @override
@@ -1009,6 +1235,7 @@ class _AddDevicePageState extends State<AddDevicePage> {
     _deviceIdController.dispose();
     _deviceNameController.dispose();
     _ratedPowerController.dispose();
+    _deviceTypeController.dispose();
     super.dispose();
   }
 
@@ -1024,6 +1251,9 @@ class _AddDevicePageState extends State<AddDevicePage> {
         deviceId: _deviceIdController.text.trim(),
         deviceName: _deviceNameController.text.trim(),
         ratedPowerWatts: double.parse(_ratedPowerController.text),
+        deviceType: _deviceTypeController.text.trim().isEmpty
+            ? 'energy_sensor'
+            : _deviceTypeController.text.trim(),
       );
 
       if (mounted) {
@@ -1113,6 +1343,17 @@ class _AddDevicePageState extends State<AddDevicePage> {
                 },
               ),
               const SizedBox(height: 16),
+                TextFormField(
+                  controller: _deviceTypeController,
+                  decoration: InputDecoration(
+                    labelText: 'Device Type',
+                    hintText: 'e.g., energy_sensor',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
               TextFormField(
                 controller: _ratedPowerController,
                 keyboardType: TextInputType.number,
