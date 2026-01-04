@@ -2,7 +2,11 @@ fastapi
 uvicorn
 pymongo
 python-dotenv
+passlib[bcrypt]
+bcrypt
+python-jose[cryptography]
 pandas
 numpy
 scikit-learn
 tensorflow
+pydantic
