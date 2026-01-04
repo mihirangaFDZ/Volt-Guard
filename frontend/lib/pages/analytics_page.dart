@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/sensor_reading.dart';
 import '../services/analytics_service.dart';
@@ -15,9 +16,13 @@ class AnalyticsPage extends StatefulWidget {
 class _AnalyticsPageState extends State<AnalyticsPage> {
   final AnalyticsService _analyticsService = AnalyticsService();
 
+  static const int _maxActiveRecs = 3;
   List<SensorReading> _readings = [];
   bool _loading = true;
   String? _error;
+  List<_RecItem> _activeRecItems = [];
+  List<_Recommendation> _backlogRecs = [];
+  List<_CompletedEntry> _history = [];
 
   @override
   void initState() {
@@ -33,9 +38,23 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       });
 
       final data = await _analyticsService.fetchLatestReadings(limit: 50);
+      _DerivedStats? stats;
+      if (data.isNotEmpty) {
+        stats = _deriveStats(data);
+      }
       if (!mounted) return;
       setState(() {
         _readings = data;
+        if (stats != null) {
+          final recs = _buildRecList(stats!);
+          _activeRecItems = recs.take(_maxActiveRecs).map((r) => _RecItem(rec: r)).toList();
+          _backlogRecs = recs.skip(_maxActiveRecs).toList();
+          _history = [];
+        } else {
+          _activeRecItems = [];
+          _backlogRecs = [];
+          _history = [];
+        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -113,7 +132,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           const SizedBox(height: 16),
           _buildSensorHealth(latest, stats),
           const SizedBox(height: 16),
-          _buildRecommendations(stats),
+          _buildRecommendations(),
           const SizedBox(height: 16),
           _buildRecentReadings(_readings),
         ],
@@ -213,7 +232,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 _pill('Vacancy: ${stats.vacancyMinutes} min'),
                 _pill('Avg temp: ${stats.avgTemp.toStringAsFixed(1)}°C'),
                 _pill('Avg humidity: ${stats.avgHumidity.toStringAsFixed(0)}%'),
-                _pill('Est people: ${stats.estimatedPeople} • ${stats.occupancyConfidenceLabel}'),
+                _pill('People: ${stats.displayPeople} • ${stats.occupancyConfidenceLabel}'),
               ],
             ),
           ],
@@ -234,18 +253,20 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               children: [
                 Icon(Icons.people, color: stats.occupancyConfidenceColor),
                 const SizedBox(width: 8),
-                const Text('People Count (estimated)',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(
+                  stats.hasActualPeople ? 'People Count (reported)' : 'People Count (estimated)',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
                 const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: stats.occupancyConfidenceColor.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(8),
+                TextButton(
+                  onPressed: () => _showPeopleEstimateInfo(stats),
+                  style: TextButton.styleFrom(
+                    foregroundColor: stats.occupancyConfidenceColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    minimumSize: const Size(40, 36),
                   ),
                   child: Text(stats.occupancyConfidenceLabel,
-                      style: TextStyle(
-                        color: stats.occupancyConfidenceColor,
+                      style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 11,
                       )),
@@ -255,25 +276,40 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
             const SizedBox(height: 12),
             Row(
               children: [
-                Text('${stats.estimatedPeople}',
+                Text('${stats.displayPeople}',
                     style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold)),
                 const SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Based on last ${stats.motionWindow} readings',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[700])),
-                    Text('${stats.motionHits} motion hits (PIR/RCWL)',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                    if (stats.hasActualPeople)
+                      Text('Reported by sensor payload',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[700]))
+                    else ...[
+                      Text('Based on last ${stats.motionWindow} readings',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                      Text('${stats.motionHits} motion hits (PIR/RCWL)',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                    ],
                   ],
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              'Note: PIR/RCWL are binary presence sensors; count is inferred (0 or 1) from recent motion intensity.',
-              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-            ),
+            if (!stats.hasActualPeople)
+              Text(
+                'Note: PIR/RCWL are binary presence sensors; count is inferred (0 or 1) from recent motion intensity.',
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _loadReadings,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Refresh now'),
+              ),
+            )
           ],
         ),
       ),
@@ -357,8 +393,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _buildRecommendations(_DerivedStats stats) {
-    final List<_Recommendation> recs = _buildRecList(stats);
+  Widget _buildRecommendations() {
+    final List<_RecItem> recs = _activeRecItems;
     return Card(
       elevation: 2,
       child: Padding(
@@ -374,7 +410,19 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               ],
             ),
             const SizedBox(height: 12),
-            ...recs.map(_recTile).toList(),
+            if (recs.isEmpty)
+              Text('No recommendations right now.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]))
+            else
+              ...List.generate(recs.length, (index) => _recTile(recs[index], () => _handleRecAction(index))),
+            if (_history.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Divider(color: Colors.grey[300]),
+              const SizedBox(height: 8),
+              Text('History', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.grey[800])),
+              const SizedBox(height: 8),
+              ..._history.take(5).map((entry) => _historyTile(entry)).toList(),
+            ],
           ],
         ),
       ),
@@ -407,31 +455,99 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _recTile(_Recommendation rec) {
+  Widget _recTile(_RecItem item, VoidCallback onPressed) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(rec.icon, color: rec.color),
+          Icon(item.rec.icon, color: item.rec.color),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(rec.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(item.rec.title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      decoration: item.completed ? TextDecoration.lineThrough : TextDecoration.none,
+                    )),
                 const SizedBox(height: 4),
-                Text(rec.detail, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                Text(item.rec.detail,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: item.completed ? Colors.grey[500] : Colors.grey[700],
+                    )),
+                if (item.completed)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      children: const [
+                        Icon(Icons.check_circle, color: Colors.green, size: 16),
+                        SizedBox(width: 6),
+                        Text('Completed', style: TextStyle(color: Colors.green, fontSize: 12)),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: rec.color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-            child: Text(rec.cta, style: TextStyle(color: rec.color, fontSize: 11, fontWeight: FontWeight.w700)),
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: item.completed ? Colors.grey : item.rec.color,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: const Size(64, 36),
+            ),
+            onPressed: item.completed ? null : onPressed,
+            child: Text(item.completed ? 'Done' : item.rec.cta,
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _historyTile(_CompletedEntry entry) {
+    final _RecItem item = entry.item;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.check_circle, color: Colors.green, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.rec.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(item.rec.detail,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                Text(_friendlyTime(entry.completedAt),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleRecAction(int index) {
+    if (index < 0 || index >= _activeRecItems.length) return;
+    final _RecItem item = _activeRecItems[index];
+    if (item.completed) return;
+
+    setState(() {
+      item.completed = true;
+      _history.insert(0, _CompletedEntry(item: item, completedAt: DateTime.now()));
+      _activeRecItems.removeAt(index);
+      _appendNextRecLocked();
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Completed: ${item.rec.title}')),
     );
   }
 
@@ -440,32 +556,66 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     final Color color = occupied ? Colors.green : Colors.orange;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Icon(occupied ? Icons.sensor_occupied : Icons.sensor_door, color: color),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('${reading.location} • ${_friendlyTime(reading.receivedAt)}',
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 2),
-                Text(
-                  'Temp ${reading.temperature.toStringAsFixed(1)}°C, Hum ${reading.humidity.toStringAsFixed(0)}%, PIR ${reading.pir}, RCWL ${reading.rcwl}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                ),
-              ],
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _showReadingDetails(reading),
+        child: Row(
+          children: [
+            Icon(occupied ? Icons.sensor_occupied : Icons.sensor_door, color: color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${reading.location} • ${_friendlyTime(reading.receivedAt)}',
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Temp ${reading.temperature.toStringAsFixed(1)}°C, Hum ${reading.humidity.toStringAsFixed(0)}%, PIR ${reading.pir}, RCWL ${reading.rcwl}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-            child: Text(occupied ? 'Occupied' : 'Vacant',
-                style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
-          ),
-        ],
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+              child: Text(occupied ? 'Occupied' : 'Vacant',
+                  style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  void _showReadingDetails(SensorReading reading) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${reading.location} • ${reading.module}',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Text('Seen ${_friendlyTime(reading.receivedAt)}'),
+              const SizedBox(height: 12),
+              Text('PIR: ${reading.pir}, RCWL: ${reading.rcwl}'),
+              Text('Temp: ${reading.temperature.toStringAsFixed(1)}°C, Hum: ${reading.humidity.toStringAsFixed(0)}%'),
+              Text('RSSI: ${reading.rssi ?? 'n/a'} dBm, Uptime: ${reading.uptime ?? 0}s'),
+              if (reading.heap != null) Text('Heap: ${reading.heap} B'),
+              if (reading.ip != null) Text('IP: ${reading.ip}'),
+              if (reading.mac != null) Text('MAC: ${reading.mac}'),
+              if (reading.source != null) Text('Source: ${reading.source}'),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -506,6 +656,14 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
           const SizedBox(height: 2),
           Text(hint, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+          if (label == 'IP' && value != 'n/a')
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => _handleCopy(value),
+                child: const Text('Copy', style: TextStyle(fontSize: 11)),
+              ),
+            ),
         ],
       ),
     );
@@ -517,6 +675,44 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+
+  void _showPeopleEstimateInfo(_DerivedStats stats) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('People Count Method'),
+          content: Text(
+            stats.hasActualPeople
+                ? 'This room is reporting a people count directly in the payload. Showing the reported value.'
+                : 'Uses PIR/RCWL motion hits over the last ${stats.motionWindow} readings; motion hits: ${stats.motionHits}; confidence: ${stats.occupancyConfidenceLabel}.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _handleCopy(String value) {
+    Clipboard.setData(ClipboardData(text: value));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Copied: $value')),
+    );
+  }
+
+  void _appendNextRecLocked() {
+    if (_backlogRecs.isEmpty) return;
+
+    while (_activeRecItems.length < _maxActiveRecs && _backlogRecs.isNotEmpty) {
+      final _Recommendation next = _backlogRecs.removeAt(0);
+      _activeRecItems.add(_RecItem(rec: next));
+    }
   }
 }
 
@@ -535,6 +731,8 @@ class _DerivedStats {
     required this.comfortNote,
     required this.tempBandProgress,
     required this.estimatedPeople,
+    required this.displayPeople,
+    required this.hasActualPeople,
     required this.motionHits,
     required this.motionWindow,
     required this.occupancyConfidenceLabel,
@@ -554,6 +752,8 @@ class _DerivedStats {
   final String comfortNote;
   final double tempBandProgress;
   final int estimatedPeople;
+  final int displayPeople;
+  final bool hasActualPeople;
   final int motionHits;
   final int motionWindow;
   final String occupancyConfidenceLabel;
@@ -574,6 +774,20 @@ class _Recommendation {
   final String cta;
   final Color color;
   final IconData icon;
+}
+
+class _RecItem {
+  _RecItem({required this.rec, this.completed = false});
+
+  final _Recommendation rec;
+  bool completed;
+}
+
+class _CompletedEntry {
+  _CompletedEntry({required this.item, required this.completedAt});
+
+  final _RecItem item;
+  final DateTime completedAt;
 }
 
 _DerivedStats _deriveStats(List<SensorReading> readings) {
@@ -622,9 +836,16 @@ _DerivedStats _deriveStats(List<SensorReading> readings) {
   final int motionWindow = window.length;
   final int estimatedPeople = motionHits > 0 ? 1 : 0;
   final double confidence = motionWindow == 0 ? 0 : motionHits / motionWindow;
+
+  final int? actualPeople = latest.peopleCount;
+  final int displayPeople = ((actualPeople ?? estimatedPeople).clamp(0, 500)).toInt();
+  final bool hasActualPeople = actualPeople != null;
   final String occupancyConfidenceLabel;
   final Color occupancyConfidenceColor;
-  if (confidence >= 0.7) {
+  if (hasActualPeople) {
+    occupancyConfidenceLabel = 'Reported';
+    occupancyConfidenceColor = Colors.blueGrey;
+  } else if (confidence >= 0.7) {
     occupancyConfidenceLabel = 'High confidence';
     occupancyConfidenceColor = Colors.green;
   } else if (confidence >= 0.4) {
@@ -649,6 +870,8 @@ _DerivedStats _deriveStats(List<SensorReading> readings) {
     comfortNote: comfortNote,
     tempBandProgress: tempBandProgress,
     estimatedPeople: estimatedPeople,
+    displayPeople: displayPeople,
+    hasActualPeople: hasActualPeople,
     motionHits: motionHits,
     motionWindow: motionWindow,
     occupancyConfidenceLabel: occupancyConfidenceLabel,

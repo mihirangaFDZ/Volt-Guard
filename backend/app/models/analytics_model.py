@@ -1,6 +1,8 @@
 from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
+from enum import Enum
+from typing import List
 
 
 class SensorReading(BaseModel):
@@ -21,3 +23,21 @@ class SensorReading(BaseModel):
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
         allow_population_by_field_name = True
+
+
+class RecommendationSeverity(str, Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+
+
+class Recommendation(BaseModel):
+    title: str
+    detail: str
+    cta: str
+    severity: RecommendationSeverity = RecommendationSeverity.low
+
+
+class RecommendationsResponse(BaseModel):
+    recommendations: List[Recommendation] = []
+    count: int = 0
