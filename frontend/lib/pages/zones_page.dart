@@ -116,8 +116,6 @@ class _ZonesPageState extends State<ZonesPage> {
                         children: [
                           _buildSummarySection(),
                           const SizedBox(height: 24),
-                          _buildQuickActionsSection(),
-                          const SizedBox(height: 24),
                           _buildHighlightsSection(),
                           const SizedBox(height: 24),
                           _buildPerformanceSection(),
@@ -154,7 +152,7 @@ class _ZonesPageState extends State<ZonesPage> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF0B1220), Color(0xFF111827)],
+          colors: [Color(0xFF0A1E2F), Color(0xFF0F2F46)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -235,9 +233,9 @@ class _ZonesPageState extends State<ZonesPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: Colors.white.withOpacity(0.05),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.35)),
+        border: Border.all(color: color.withOpacity(0.28)),
         boxShadow: const [
           BoxShadow(color: Color(0x1A000000), blurRadius: 14, offset: Offset(0, 10)),
         ],
@@ -264,68 +262,6 @@ class _ZonesPageState extends State<ZonesPage> {
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActionsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Quick Actions",
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _buildActionButton(
-                icon: Icons.power_settings_new,
-                label: "All Off",
-                color: const Color(0xFFEF5350),
-                onPressed: () => _showActionSnackbar("All devices turned OFF"),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildActionButton(
-                icon: Icons.power,
-                label: "All On",
-                color: const Color(0xFF4CAF50),
-                onPressed: () => _showActionSnackbar("All devices turned ON"),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildActionButton(
-                icon: Icons.eco,
-                label: "Power Saver",
-                color: const Color(0xFF2196F3),
-                onPressed: () => _showActionSnackbar("Power Saver mode activated"),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onPressed,
-  }) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 18),
-      label: Text(label, style: const TextStyle(fontSize: 12)),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }
@@ -1026,7 +962,7 @@ class _ZonesPageState extends State<ZonesPage> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF0B1220), Color(0xFF0F172A)],
+          colors: [Color(0xFF0A1E2F), Color(0xFF102B3F)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -1106,7 +1042,7 @@ class _ZonesPageState extends State<ZonesPage> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFF0F172A), Color(0xFF1F2937)],
+            colors: [Color(0xFF0D2335), Color(0xFF12374E)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
