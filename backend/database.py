@@ -21,6 +21,7 @@ client = MongoClient(
     retryReads=True,
     maxPoolSize=10,
     minPoolSize=1
+    
 )
 db = client[os.getenv("MONGODB_DB_NAME")]
 
