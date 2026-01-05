@@ -17,6 +17,7 @@ class ZoneDetailsPage extends StatefulWidget {
 }
 
 class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
+  static const double _lkrPerKwh = 12.0;
   late List<DeviceData> devices;
   Map<String, Map<String, dynamic>> _energyByLocation = {};
   double _zoneLiveCurrent = 0.0;
@@ -211,21 +212,21 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
   }
 
   double get totalEnergy => _zoneEnergyKwh;
-  double get estimatedCost => _zoneEnergyKwh * 12; // Assuming LKR 12 per kWh
+  double get estimatedCost => _zoneEnergyKwh * _lkrPerKwh; // LKR per kWh
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9F9),
+      backgroundColor: const Color(0xFF0B1220),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(widget.zone.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(widget.zone.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         actions: [
           IconButton(
             tooltip: 'Refresh',
             onPressed: _loadDevices,
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
           ),
           PopupMenuButton<String>(
             onSelected: (value) => _handleMenuAction(value),
@@ -254,29 +255,31 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadDevices,
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Zone Summary Card
-              _buildZoneSummaryCard(),
-              const SizedBox(height: 24),
-
-              // Today's Energy
-              _buildTodayEnergySection(),
-              const SizedBox(height: 24),
-
-              // Tab Navigation
-              _buildTabNavigation(),
-              const SizedBox(height: 16),
-
-              // Tab Content
-              _buildTabContent(),
-            ],
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0B1220), Color(0xFF0F172A)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: RefreshIndicator(
+          onRefresh: _loadDevices,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildZoneSummaryCard(),
+                const SizedBox(height: 20),
+                _buildTodayEnergySection(),
+                const SizedBox(height: 20),
+                _buildTabNavigation(),
+                const SizedBox(height: 14),
+                _buildTabContent(),
+              ],
+            ),
           ),
         ),
       ),
@@ -285,14 +288,17 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
 
   Widget _buildZoneSummaryCard() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF4A90E2), Color(0xFF2563EB)],
+          colors: [Color(0xFF1D4ED8), Color(0xFF0EA5E9)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(color: Color(0x331D4ED8), blurRadius: 18, offset: Offset(0, 12)),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -307,7 +313,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                     widget.zone.name,
                     style: const TextStyle(
                       fontSize: 20,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w900,
                       color: Colors.white,
                     ),
                   ),
@@ -315,17 +321,17 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                   Text(
                     "${widget.zone.type} • Floor ${widget.zone.floor}",
                     style: const TextStyle(
-                      fontSize: 14,
+                      fontSize: 13,
                       color: Colors.white70,
                     ),
                   ),
                 ],
               ),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.white.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Column(
                   children: [
@@ -353,12 +359,12 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                 value: "${(widget.zone.currentPower / 1000).toStringAsFixed(1)} kW",
               ),
               _buildSummaryItem(
-                icon: Icons.devices,
-                label: "Devices",
+                icon: Icons.devices_other,
+                label: "Devices On",
                 value: "${devices.where((d) => d.status == 'on').length}/${devices.length}",
               ),
               _buildSummaryItem(
-                icon: Icons.thermostat,
+                icon: Icons.visibility,
                 label: "Occupancy",
                 value: widget.zone.occupancy == "occupied" ? "Active" : "Empty",
               ),
@@ -376,8 +382,15 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
   }) {
     return Column(
       children: [
-        Icon(icon, color: Colors.white, size: 20),
-        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.16),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: Colors.white, size: 18),
+        ),
+        const SizedBox(height: 6),
         Text(
           label,
           style: const TextStyle(
@@ -385,12 +398,12 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
             color: Colors.white70,
           ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 4),
         Text(
           value,
           style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
             color: Colors.white,
           ),
         ),
@@ -403,88 +416,75 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          "Today's Energy Usage",
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          "Today's Energy",
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
         ),
         const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey[200]!),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              Column(
-                children: [
-                  const Icon(Icons.bolt, color: Color(0xFFFBBF24), size: 28),
-                  const SizedBox(height: 8),
-                  Text(
-                    "${totalEnergy.toStringAsFixed(2)} kWh",
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Energy Consumed",
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
+        Row(
+          children: [
+            Expanded(
+              child: _buildMiniStat(
+                icon: Icons.bolt,
+                color: const Color(0xFFFBBF24),
+                title: "Cost (today)",
+                value: "LKR ${estimatedCost.toStringAsFixed(0)}",
               ),
-              Container(
-                height: 50,
-                width: 1,
-                color: Colors.grey[200],
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _buildMiniStat(
+                icon: Icons.attach_money,
+                color: const Color(0xFF22C55E),
+                title: "Est. Monthly",
+                value: "LKR ${(estimatedCost * 30).toStringAsFixed(0)}",
               ),
-              Column(
-                children: [
-                  const Icon(Icons.attach_money, color: Color(0xFF00C853), size: 28),
-                  const SizedBox(height: 8),
-                  Text(
-                    "LKR ${estimatedCost.toStringAsFixed(0)}",
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Estimated Cost",
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _buildMiniStat(
+                icon: Icons.electric_bolt,
+                color: const Color(0xFF38BDF8),
+                title: "Live Current",
+                value: "${_zoneLiveCurrent.toStringAsFixed(2)} A",
               ),
-              Container(
-                height: 50,
-                width: 1,
-                color: Colors.grey[200],
-              ),
-              Column(
-                children: [
-                  const Icon(Icons.electric_bolt, color: Color(0xFF42A5F5), size: 28),
-                  const SizedBox(height: 8),
-                  Text(
-                    "${_zoneLiveCurrent.toStringAsFixed(2)} A",
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Live Current",
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ],
+    );
+  }
+
+  Widget _buildMiniStat({required IconData icon, required Color color, required String title, required String value}) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.18),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 12, color: Colors.white70),
+          ),
+        ],
+      ),
     );
   }
 
@@ -508,18 +508,18 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF4A90E2) : Colors.white,
+            color: isSelected ? const Color(0xFF2563EB) : Colors.white.withOpacity(0.06),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: isSelected ? const Color(0xFF4A90E2) : Colors.grey[200]!,
+              color: isSelected ? const Color(0xFF2563EB) : Colors.white24,
             ),
           ),
           child: Text(
             label,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: isSelected ? Colors.white : Colors.black87,
+              fontWeight: FontWeight.w700,
+              color: isSelected ? Colors.white : Colors.white70,
             ),
           ),
         ),
@@ -549,7 +549,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
           children: [
             const Text(
               "Connected Devices",
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
             ),
             ElevatedButton.icon(
               onPressed: () => _showAddDeviceDialog(),
@@ -590,23 +590,30 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
     final staleLabel = isStale ? ' (stale)' : '';
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+        boxShadow: const [
+          BoxShadow(color: Color(0x220F172A), blurRadius: 12, offset: Offset(0, 10)),
+        ],
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: isOn ? const Color(0xFFE8F5E9) : Colors.grey[100],
+              color: isOn ? const Color(0xFF22C55E).withOpacity(0.15) : Colors.white.withOpacity(0.06),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
               Icons.devices,
-              color: isOn ? const Color(0xFF4CAF50) : Colors.grey[600],
+              color: isOn ? const Color(0xFF22C55E) : Colors.white70,
             ),
           ),
           const SizedBox(width: 12),
@@ -616,25 +623,25 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
               children: [
                 Text(
                   device.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   "${device.type} • ${device.power}W",
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  style: const TextStyle(fontSize: 12, color: Colors.white70),
                 ),
                 const SizedBox(height: 4),
                 if (device.liveCurrentA != null)
                   Text(
                     "Live: ${device.liveCurrentA!.toStringAsFixed(2)} A",
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF1565C0)),
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF60A5FA)),
                   ),
                 if (device.lastEnergyTs != null)
                   Text(
                     "Updated: $tsText$staleLabel",
                     style: TextStyle(
                       fontSize: 11,
-                      color: isStale ? Colors.red[500] : Colors.grey[500],
+                      color: isStale ? Colors.red[300] : Colors.white60,
                     ),
                   ),
               ],
@@ -647,8 +654,8 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: isOn
-                      ? const Color(0xFFE8F5E9)
-                      : const Color(0xFFF5F5F5),
+                      ? const Color(0xFF22C55E).withOpacity(0.15)
+                      : Colors.white.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -657,24 +664,24 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
                     color: isOn
-                        ? const Color(0xFF2E7D32)
-                        : Colors.grey[600],
+                        ? const Color(0xFF22C55E)
+                        : Colors.white70,
                   ),
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                "${device.energyToday.toStringAsFixed(2)} kWh est.",
+                "LKR ${(device.energyToday * _lkrPerKwh).toStringAsFixed(2)} est.",
                 style: TextStyle(
                   fontSize: 11,
-                  color: Colors.grey[600],
+                  color: Colors.white70,
                 ),
               ),
               Text(
-                "~${(device.energyToday * 30).toStringAsFixed(1)} kWh/mo",
+                "~LKR ${(device.energyToday * 30 * _lkrPerKwh).toStringAsFixed(0)}/mo",
                 style: TextStyle(
                   fontSize: 11,
-                  color: Colors.grey[600],
+                  color: Colors.white54,
                 ),
               ),
             ],
@@ -689,7 +696,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
             ),
             child: Icon(
               Icons.power_settings_new,
-              color: isOn ? const Color(0xFF4CAF50) : Colors.grey[400],
+              color: isOn ? const Color(0xFF22C55E) : Colors.white38,
               size: 20,
             ),
           ),
