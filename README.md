@@ -8,16 +8,19 @@ Volt Guard is an advanced AI-powered energy management system that analyzes ener
 ## 📋 Table of Contents
 
 1. [Overview](#overview)
-2. [Model Training](#model-training)
-3. [Features](#features)
-4. [Architecture](#architecture)
-5. [Technology Stack](#technology-stack)
-6. [Dependencies](#dependencies)
-7. [Getting Started](#getting-started)
-8. [Project Structure](#project-structure)
-9. [API Documentation](#api-documentation)
-10. [Security](#security)
-11. [Testing](#testing)
+2. [Quick Start](#quick-start)
+3. [Model Training](#model-training)
+4. [Features](#features)
+5. [Architecture](#architecture)
+6. [Technology Stack](#technology-stack)
+7. [Dependencies](#dependencies)
+8. [Getting Started](#getting-started)
+9. [IoT Hardware Setup](#iot-hardware-setup)
+10. [Project Structure](#project-structure)
+11. [API Documentation](#api-documentation)
+12. [Security](#security)
+13. [Testing](#testing)
+14. [Deployment](#deployment)
 
 ---
 
@@ -25,14 +28,87 @@ Volt Guard is an advanced AI-powered energy management system that analyzes ener
 
 Volt Guard is a comprehensive smart energy management solution that combines IoT sensors, cloud infrastructure, and artificial intelligence to provide real-time energy monitoring, predictive analytics, and automated anomaly detection. The system collects energy consumption data from IoT-enabled devices (ESP32/ESP8266), processes it through AI models, and delivers actionable insights through a mobile application.
 
+### Project Purpose
+
+Volt Guard addresses the growing need for intelligent energy management in residential and commercial settings. By leveraging IoT sensors and machine learning, the system enables users to:
+
+- Monitor energy consumption in real-time across multiple locations/zones
+- Predict future energy usage patterns to optimize consumption
+- Detect anomalies and potential faults before they become critical issues
+- Make data-driven decisions to reduce energy costs and improve efficiency
+
 ### Key Capabilities
 
-- **Real-time Energy Monitoring**: Continuous collection and processing of energy consumption data from multiple IoT sensors
-- **AI-Powered Predictions**: Machine learning models (LSTM Neural Networks and Random Forest) predict future energy consumption patterns
-- **Anomaly Detection**: Automatic identification of unusual energy consumption patterns using Isolation Forest algorithms
-- **Fault Detection**: Early detection of potential appliance malfunctions based on power consumption signatures
-- **Mobile Dashboard**: Cross-platform mobile application (iOS/Android) for real-time monitoring and alerts
-- **RESTful API**: Scalable Python backend with FastAPI for data management and ML model inference
+- **Real-time Energy Monitoring**: Continuous collection and processing of energy consumption data from multiple IoT sensors (current, voltage, power, energy)
+- **AI-Powered Predictions**: Machine learning models (LSTM Neural Networks and Random Forest) predict future energy consumption patterns with high accuracy
+- **Anomaly Detection**: Automatic identification of unusual energy consumption patterns using Isolation Forest algorithms, enabling early warning of potential issues
+- **Fault Detection**: Early detection of potential appliance malfunctions based on power consumption signatures and pattern analysis
+- **Occupancy Analytics**: Integration of occupancy sensors (PIR, RCWL) and environmental sensors (DHT22) for comprehensive space monitoring
+- **Mobile Dashboard**: Cross-platform mobile application (iOS/Android) for real-time monitoring, historical data visualization, and alerts
+- **RESTful API**: Scalable Python backend with FastAPI for data management, ML model inference, and secure API access
+- **Zone Management**: Organize and monitor multiple locations/zones with device grouping and location-based analytics
+- **User Authentication**: Secure JWT-based authentication system for multi-user access control
+
+### System Components
+
+1. **IoT Hardware**: ESP32/ESP8266 microcontrollers with various sensors
+2. **Backend API**: FastAPI-based REST API for data processing and ML inference
+3. **Legacy API**: Flask-based API for telemetry ingestion (alternative to MQTT)
+4. **Database**: MongoDB for time-series data storage
+5. **ML Models**: Three trained models for predictions and anomaly detection
+6. **Mobile App**: Flutter application for iOS and Android platforms
+
+---
+
+## ⚡ Quick Start
+
+### Prerequisites Checklist
+
+- [ ] Python 3.9+ installed
+- [ ] Flutter SDK 3.0+ installed
+- [ ] MongoDB installed (local or Atlas account)
+- [ ] Git installed
+- [ ] Code editor (VS Code recommended)
+
+### 5-Minute Setup
+
+**1. Clone the Repository**
+```bash
+git clone <repository-url>
+cd Volt-Guard
+```
+
+**2. Setup Backend**
+```bash
+cd backend
+python -m venv venv
+venv\Scripts\activate  # Windows
+# or
+source venv/bin/activate  # Linux/Mac
+
+pip install -r requirements.txt
+
+# Create .env file with MongoDB connection
+# MONGO_URI=mongodb://localhost:27017
+# MONGODB_DB_NAME=volt_guard
+# SECRET_KEY=your-secret-key
+
+uvicorn app.main:app --reload
+```
+
+**3. Setup Frontend**
+```bash
+cd ../frontend
+flutter pub get
+flutter run
+```
+
+**4. Access the System**
+- Backend API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+- Mobile App: Running on your device/emulator
+
+**Note:** For ML features to work, you need to train the models first (see [Model Training](#model-training) section).
 
 ---
 
@@ -156,72 +232,258 @@ Models should be retrained periodically (weekly/monthly) as more data becomes av
 
 ## 📊 Architecture
 
+### System Architecture Overview
+
+Volt Guard follows a layered architecture pattern with clear separation of concerns:
+
+1. **IoT Layer**: Hardware devices collecting sensor data
+2. **Communication Layer**: MQTT broker for real-time data transmission
+3. **Backend Layer**: FastAPI REST API for data processing and ML inference
+4. **Data Layer**: MongoDB for persistent storage
+5. **ML Layer**: Trained machine learning models for predictions and anomaly detection
+6. **Presentation Layer**: Flutter mobile application for user interaction
+
 ### System Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         VOLT GUARD SYSTEM                            │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          VOLT GUARD SYSTEM ARCHITECTURE                      │
+└─────────────────────────────────────────────────────────────────────────────┘
 
-┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-│  IoT Devices │────────▶│ MQTT Broker  │────────▶│ Backend API  │
-│              │         │              │         │  (FastAPI)   │
-│ • ESP32      │         │ • Mosquitto  │         │              │
-│ • ESP8266    │         │ • Port 1883  │         │ Port 8000    │
-│ • ACS712     │         └──────────────┘         └──────┬───────┘
-│ • PIR/RCWL   │                                        │
-│ • DHT22      │                                        │
-└──────────────┘                                        │
-                                                        ▼
-                                               ┌──────────────┐
-                                               │   MongoDB    │
-                                               │   Database   │
-                                               │              │
-                                               │ Collections: │
-                                               │ • energy_    │
-                                               │   readings   │
-                                               │ • occupancy_ │
-                                               │   telemetry  │
-                                               │ • devices    │
-                                               │ • predictions│
-                                               │ • anomalies  │
-                                               │ • faults     │
-                                               └──────┬───────┘
-                                                      │
-                                                      ▼
-┌──────────────┐         ┌──────────────┐    ┌──────────────┐
-│ Mobile App   │────────▶│   REST API   │◀───│  ML Models   │
-│  (Flutter)   │         │  Endpoints   │    │              │
-│              │         │              │    │ • Isolation  │
-│ • iOS        │         │ • /prediction│    │   Forest     │
-│ • Android    │         │ • /anomalies │    │ • Random     │
-│              │         │ • /energy    │    │   Forest     │
-│ Features:    │         │ • /devices   │    │ • LSTM       │
-│ • Dashboard  │         │ • /zones     │    │              │
-│ • Charts     │         │ • /faults    │    │ Models/      │
-│ • Alerts     │         └──────────────┘    │ Directory    │
-└──────────────┘                             └──────────────┘
+                                    ┌──────────────┐
+                                    │   Users      │
+                                    │  (Mobile)    │
+                                    └──────┬───────┘
+                                           │ HTTPS/REST API
+                                           │
+                    ┌──────────────────────┴──────────────────────┐
+                    │                                            │
+                    ▼                                            ▼
+        ┌──────────────────────┐              ┌──────────────────────┐
+        │   Mobile App         │              │   Legacy API          │
+        │   (Flutter)          │              │   (Flask)             │
+        │                      │              │                       │
+        │ • iOS                │              │ • Telemetry Endpoint  │
+        │ • Android            │              │ • Health Check        │
+        │                      │              │ • Port: Variable      │
+        │ Features:            │              └──────────┬───────────┘
+        │ • Dashboard          │                         │
+        │ • Real-time Charts   │                         │
+        │ • Anomaly Alerts     │                         │
+        │ • Device Management  │                         │
+        │ • Zone Management    │                         │
+        └──────────┬───────────┘                         │
+                   │                                      │
+                   │ REST API                            │ HTTP POST
+                   │ (JWT Auth)                          │ (API Key Auth)
+                   │                                      │
+                   └──────────────┬───────────────────────┘
+                                  │
+                                  ▼
+                    ┌─────────────────────────────┐
+                    │    Backend API (FastAPI)   │
+                    │                            │
+                    │ • Port: 8000               │
+                    │ • Authentication: JWT      │
+                    │ • API Docs: /docs           │
+                    │                            │
+                    │ Routes:                     │
+                    │ • /auth/*                   │
+                    │ • /energy/*                 │
+                    │ • /devices/*                │
+                    │ • /zones/*                 │
+                    │ • /prediction/*             │
+                    │ • /anomalies/*              │
+                    │ • /faults/*                 │
+                    │ • /analytics/*              │
+                    │ • /users/*                  │
+                    └────────────┬────────────────┘
+                                 │
+                ┌────────────────┼────────────────┐
+                │                │                │
+                ▼                ▼                ▼
+    ┌──────────────────┐  ┌──────────────┐  ┌──────────────┐
+    │   MongoDB        │  │  ML Models   │  │  MQTT        │
+    │   Database       │  │  Directory   │  │  Subscriber  │
+    │                  │  │              │  │              │
+    │ Collections:     │  │ • anomaly_   │  │ (Optional)   │
+    │ • energy_        │  │   model.pkl  │  │              │
+    │   readings       │  │ • prediction_│  │              │
+    │ • occupancy_     │  │   model.pkl  │  │              │
+    │   telemetry      │  │ • lstm_model │  │              │
+    │ • devices        │  │   .h5        │  │              │
+    │ • predictions    │  │ • lstm_      │  │              │
+    │ • anomalies      │  │   scalers.   │  │              │
+    │ • faults         │  │   pkl        │  │              │
+    │ • users          │  │              │  │              │
+    │ • zones          │  └──────────────┘  └──────────────┘
+    └──────────────────┘                            │
+                                                     │ MQTT Protocol
+                                                     │ (Port 1883)
+                                                     │
+                                                     ▼
+                                    ┌─────────────────────────┐
+                                    │    MQTT Broker          │
+                                    │    (Mosquitto)           │
+                                    │                          │
+                                    │ Topics:                  │
+                                    │ • energy/telemetry       │
+                                    │ • occupancy/telemetry    │
+                                    └────────────┬──────────────┘
+                                                 │
+                                                 │ MQTT Publish
+                                                 │
+                    ┌────────────────────────────┴────────────────────────────┐
+                    │                                                         │
+                    ▼                                                         ▼
+        ┌──────────────────────┐                              ┌──────────────────────┐
+        │   IoT Devices        │                              │   IoT Devices        │
+        │   (ESP32/ESP8266)    │                              │   (ESP32/ESP8266)    │
+        │                      │                              │                      │
+        │ Sensors:             │                              │ Sensors:             │
+        │ • ACS712             │                              │ • PIR Sensor         │
+        │   (Current Sensor)   │                              │ • RCWL Sensor        │
+        │ • Voltage Divider    │                              │ • DHT22              │
+        │                      │                              │   (Temp/Humidity)    │
+        │ Data Collected:      │                              │                      │
+        │ • Current (A)        │                              │ Data Collected:      │
+        │ • Voltage (V)        │                              │ • Occupancy Status   │
+        │ • Power (W)          │                              │ • Temperature (°C)   │
+        │ • Energy (kWh)       │                              │ • Humidity (%)       │
+        │ • Location           │                              │ • Location           │
+        │ • Timestamp          │                              │ • Timestamp          │
+        └──────────────────────┘                              └──────────────────────┘
 ```
 
-### Data Flow
+### Data Flow Architecture
 
 ```
-1. IoT Device → Collects sensor data (current, voltage, temperature, occupancy)
-2. MQTT Broker → Receives and routes telemetry messages
-3. Backend API → Processes and validates incoming data
-4. MongoDB → Stores raw and processed data
-5. ML Models → Analyze patterns and generate predictions/detections
-6. REST API → Serves processed data and ML insights
-7. Mobile App → Displays real-time dashboards and alerts
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          DATA FLOW DIAGRAM                               │
+└─────────────────────────────────────────────────────────────────────────┘
+
+1. DATA COLLECTION PHASE
+   ┌─────────────┐
+   │ IoT Devices │ → Collect sensor readings (current, voltage, temp, etc.)
+   └──────┬──────┘
+          │
+          │ MQTT Publish
+          ▼
+   ┌─────────────┐
+   │MQTT Broker  │ → Routes messages to subscribers
+   └──────┬──────┘
+          │
+          │ MQTT Subscribe (or HTTP POST for legacy)
+          ▼
+   ┌─────────────┐
+   │Backend API  │ → Receives and validates incoming data
+   └──────┬──────┘
+          │
+          │ Store
+          ▼
+   ┌─────────────┐
+   │  MongoDB    │ → Persists raw sensor data
+   └─────────────┘
+
+2. DATA PROCESSING PHASE
+   ┌─────────────┐
+   │  MongoDB    │ → Retrieve historical data
+   └──────┬──────┘
+          │
+          │ Query
+          ▼
+   ┌─────────────┐
+   │Backend API  │ → Data cleaning and feature engineering
+   └──────┬──────┘
+          │
+          │ Processed Features
+          ▼
+   ┌─────────────┐
+   │  ML Models  │ → Generate predictions and detect anomalies
+   └──────┬──────┘
+          │
+          │ Results
+          ▼
+   ┌─────────────┐
+   │  MongoDB    │ → Store predictions, anomalies, and faults
+   └─────────────┘
+
+3. DATA PRESENTATION PHASE
+   ┌─────────────┐
+   │  MongoDB    │ → Query processed data
+   └──────┬──────┘
+          │
+          │ REST API GET
+          ▼
+   ┌─────────────┐
+   │Backend API  │ → Serve data via REST endpoints
+   └──────┬──────┘
+          │
+          │ JSON Response
+          ▼
+   ┌─────────────┐
+   │ Mobile App  │ → Display dashboards, charts, and alerts
+   └─────────────┘
 ```
 
-### Component Interaction
+### Component Interaction Details
 
-- **IoT Layer**: ESP32/ESP8266 devices with sensors publish data via MQTT
-- **Backend Layer**: FastAPI application handles data ingestion, processing, and ML inference
-- **Data Layer**: MongoDB stores time-series data and ML model metadata
-- **ML Layer**: Trained models (LSTM, Random Forest, Isolation Forest) for predictions and anomaly detection
-- **Presentation Layer**: Flutter mobile application for user interaction
+#### 1. IoT Layer
+- **Devices**: ESP32/ESP8266 microcontrollers
+- **Sensors**:
+  - **ACS712**: Current sensor for measuring AC/DC current
+  - **Voltage Divider**: For measuring voltage
+  - **PIR Sensor**: Passive infrared motion detection
+  - **RCWL Sensor**: Microwave motion detection
+  - **DHT22**: Temperature and humidity sensor
+- **Communication**: MQTT protocol (publish to broker) or HTTP POST (legacy API)
+
+#### 2. Communication Layer
+- **MQTT Broker**: Mosquitto (default port 1883)
+- **Protocol**: MQTT 3.1.1
+- **Topics**: 
+  - `energy/telemetry` - Energy consumption data
+  - `occupancy/telemetry` - Occupancy and environmental data
+- **Alternative**: HTTP POST to legacy Flask API endpoint
+
+#### 3. Backend Layer
+- **Framework**: FastAPI (Python)
+- **Authentication**: JWT tokens for secure API access
+- **Features**:
+  - Data validation using Pydantic models
+  - Automatic API documentation (Swagger UI)
+  - CORS middleware for cross-origin requests
+  - Route handlers for all business logic
+
+#### 4. Data Layer
+- **Database**: MongoDB (NoSQL document database)
+- **Collections**:
+  - `energy_readings`: Time-series energy consumption data
+  - `occupancy_telemetry`: Occupancy and environmental sensor data
+  - `devices`: Registered IoT device information
+  - `predictions`: ML model predictions
+  - `anomalies`: Detected anomaly records
+  - `faults`: Detected fault records
+  - `users`: User accounts and authentication data
+  - `zones`: Location/zone management data
+
+#### 5. ML Layer
+- **Models**:
+  - **Isolation Forest**: Unsupervised anomaly detection
+  - **Random Forest**: Fast energy consumption prediction
+  - **LSTM Neural Network**: Time-series forecasting
+- **Storage**: Trained models stored in `backend/models/` directory
+- **Inference**: Models loaded and used for real-time predictions
+
+#### 6. Presentation Layer
+- **Framework**: Flutter (Dart)
+- **Platforms**: iOS and Android
+- **Features**:
+  - Real-time data visualization
+  - Interactive charts and graphs
+  - Push notifications for anomalies
+  - User authentication
+  - Device and zone management
 
 ---
 
@@ -258,42 +520,44 @@ Models should be retrained periodically (weekly/monthly) as more data becomes av
 
 ## 📦 Dependencies
 
-### Backend Dependencies
+### Backend Dependencies (FastAPI)
+
+The main backend API is built with FastAPI and requires the following Python packages:
 
 **Core Framework:**
 ```
-fastapi>=0.104.0          # Modern, fast web framework
-uvicorn>=0.24.0           # ASGI server
-pydantic>=2.0.0           # Data validation
+fastapi                 # Modern, fast web framework for building APIs
+uvicorn                 # ASGI server for running FastAPI applications
+pydantic                # Data validation using Python type annotations
 ```
 
 **Database:**
 ```
-pymongo>=4.6.0            # MongoDB driver
+pymongo                 # MongoDB driver for Python
 ```
 
-**Machine Learning:**
+**Machine Learning & Data Science:**
 ```
-tensorflow>=2.14.0        # Deep learning framework for LSTM
-scikit-learn>=1.3.0       # ML algorithms (Random Forest, Isolation Forest)
-pandas>=2.1.0             # Data manipulation and analysis
-numpy>=1.24.0             # Numerical computing
+tensorflow              # Deep learning framework for LSTM neural networks
+scikit-learn            # ML algorithms (Random Forest, Isolation Forest)
+pandas                  # Data manipulation and analysis
+numpy                   # Numerical computing library
 ```
 
 **Authentication & Security:**
 ```
-python-jose[cryptography] # JWT token handling
-passlib[bcrypt]>=1.7.4    # Password hashing
-bcrypt>=4.1.0             # Cryptographic library
+python-jose[cryptography]  # JWT token encoding/decoding
+passlib[bcrypt]            # Password hashing with bcrypt
+bcrypt                     # Cryptographic library for password hashing
 ```
 
 **Utilities:**
 ```
-python-dotenv>=1.0.0      # Environment variable management
+python-dotenv            # Environment variable management from .env files
 ```
 
-**Complete requirements.txt:**
-```
+**Complete Backend requirements.txt:**
+```txt
 fastapi
 uvicorn
 pymongo
@@ -308,58 +572,123 @@ tensorflow
 pydantic
 ```
 
-### Frontend Dependencies
+**Installation:**
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+### Legacy API Dependencies (Flask)
+
+The legacy Flask API in `voltguard-api/` requires:
+
+```txt
+flask                   # Lightweight web framework
+pymongo                 # MongoDB driver
+python-dotenv           # Environment variable management
+gunicorn                # WSGI HTTP server for production
+pytz                    # Timezone definitions and conversions
+```
+
+**Installation:**
+```bash
+cd voltguard-api
+pip install -r requirements.txt
+```
+
+### Frontend Dependencies (Flutter)
+
+The mobile application is built with Flutter and uses the following packages:
 
 **Core Framework:**
 ```yaml
 flutter:
-  sdk: flutter
+  sdk: flutter           # Flutter SDK (version 3.0+)
 ```
 
 **State Management:**
 ```yaml
-provider: ^6.0.5          # State management solution
+provider: ^6.0.5        # State management solution using Provider pattern
 ```
 
 **HTTP & Networking:**
 ```yaml
-http: ^1.1.0              # HTTP client for API calls
+http: ^1.1.0            # HTTP client for making API calls to backend
 ```
 
 **Data Visualization:**
 ```yaml
-fl_chart: ^0.63.0         # Beautiful charts and graphs
+fl_chart: ^0.63.0       # Beautiful charts and graphs for data visualization
 ```
 
 **Local Storage:**
 ```yaml
-shared_preferences: ^2.2.0 # Key-value storage
+shared_preferences: ^2.2.0  # Key-value storage for persisting user preferences
 ```
 
 **UI Components:**
 ```yaml
-cupertino_icons: ^1.0.2   # iOS-style icons
+cupertino_icons: ^1.0.2  # iOS-style icons
 ```
 
 **Development Tools:**
 ```yaml
-flutter_lints: ^2.0.0     # Linting rules
-flutter_launcher_icons: ^0.13.1
-flutter_native_splash: ^2.4.1
+flutter_lints: ^2.0.0              # Linting rules for Flutter
+flutter_launcher_icons: ^0.13.1   # Generate app launcher icons
+flutter_native_splash: ^2.4.1     # Generate native splash screens
+```
+
+**Complete Frontend pubspec.yaml dependencies:**
+```yaml
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  http: ^1.1.0
+  provider: ^6.0.5
+  shared_preferences: ^2.2.0
+  fl_chart: ^0.63.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.1
+```
+
+**Installation:**
+```bash
+cd frontend
+flutter pub get
 ```
 
 ### System Dependencies
 
 **Required Software:**
-- Python 3.9 or higher
-- Node.js (for Flutter tooling)
-- MongoDB 5.0+ (local or Atlas cloud)
-- MQTT Broker (Mosquitto recommended)
+- **Python 3.9+**: Required for backend API and ML model training
+- **Flutter SDK 3.0+**: Required for mobile application development
+- **MongoDB 5.0+**: Database (local installation or MongoDB Atlas cloud)
+- **MQTT Broker**: Message broker for IoT device communication (Mosquitto recommended)
+- **Git**: Version control system
+
+**Platform-Specific Requirements:**
+
+**For Android Development:**
+- Android Studio
+- Android SDK
+- Java Development Kit (JDK)
+
+**For iOS Development (macOS only):**
+- Xcode 14+
+- CocoaPods
+- iOS SDK
 
 **Optional Software:**
-- Redis (for caching)
-- Docker (for containerization)
-- Git (for version control)
+- **Redis**: For caching (optional, not currently implemented)
+- **Docker**: For containerization and deployment
+- **Node.js**: Required for Flutter tooling and development
+- **Postman/Insomnia**: For API testing
 
 ---
 
@@ -490,78 +819,245 @@ flutter run -d <device-id>
 
 ---
 
+## 🔌 IoT Hardware Setup
+
+### Required Hardware Components
+
+**Microcontrollers:**
+- **ESP32** or **ESP8266** - WiFi-enabled microcontroller for IoT connectivity
+- Recommended: ESP32 (more processing power and features)
+
+**Energy Monitoring Sensors:**
+- **ACS712 Current Sensor** - Measures AC/DC current (5A, 20A, or 30A variants)
+- **Voltage Divider Circuit** - For measuring AC/DC voltage (using resistors)
+
+**Occupancy & Environmental Sensors:**
+- **PIR Sensor** (HC-SR501) - Passive infrared motion detection
+- **RCWL-0516 Sensor** - Microwave motion detection (alternative to PIR)
+- **DHT22 Sensor** - Temperature and humidity sensor
+
+**Additional Components:**
+- Resistors for voltage divider
+- Jumper wires
+- Breadboard or PCB
+- Power supply (5V for ESP32, 3.3V for ESP8266)
+- USB cable for programming
+
+### Hardware Connections
+
+**Energy Monitoring Setup:**
+```
+ESP32/ESP8266 Pin Connections:
+- ACS712 VCC → 5V
+- ACS712 GND → GND
+- ACS712 OUT → Analog Pin (A0)
+- Voltage Divider → Analog Pin (A1)
+```
+
+**Occupancy Sensor Setup:**
+```
+ESP32/ESP8266 Pin Connections:
+- PIR VCC → 5V
+- PIR GND → GND
+- PIR OUT → Digital Pin (D2)
+- RCWL VCC → 5V
+- RCWL GND → GND
+- RCWL OUT → Digital Pin (D3)
+```
+
+**Environmental Sensor Setup:**
+```
+ESP32/ESP8266 Pin Connections:
+- DHT22 VCC → 3.3V or 5V
+- DHT22 GND → GND
+- DHT22 DATA → Digital Pin (D4)
+```
+
+### IoT Device Configuration
+
+**WiFi Setup:**
+- Configure WiFi SSID and password in device firmware
+- Ensure device can connect to same network as MQTT broker/backend API
+
+**MQTT Configuration:**
+- MQTT Broker IP address (e.g., `192.168.1.100` or `mqtt.example.com`)
+- MQTT Port (default: 1883)
+- MQTT Topics:
+  - Energy data: `energy/telemetry`
+  - Occupancy data: `occupancy/telemetry`
+- Device ID/Client ID for MQTT connection
+
+**Alternative: HTTP POST (Legacy API):**
+- If MQTT is not available, devices can POST directly to Flask API
+- Endpoint: `http://your-api-url/api/v1/telemetry`
+- Authentication: Include `X-API-Key` header
+- Data format: JSON payload matching sensor reading models
+
+### Data Format
+
+**Energy Reading Format:**
+```json
+{
+  "device_id": "ESP32_001",
+  "location": "Living Room",
+  "current_a": 2.5,
+  "voltage": 230.0,
+  "power": 575.0,
+  "energy": 0.575,
+  "timestamp": "2024-01-15T10:30:00Z"
+}
+```
+
+**Occupancy/Environmental Reading Format:**
+```json
+{
+  "module": "ESP32_001",
+  "location": "Living Room",
+  "rcwl": 1,
+  "pir": 1,
+  "temperature": 25.5,
+  "humidity": 60.0,
+  "received_at": "2024-01-15T10:30:00Z"
+}
+```
+
+### Firmware Development
+
+**Required Libraries (Arduino IDE):**
+- ESP32/ESP8266 board support
+- WiFi library
+- MQTT library (PubSubClient) or HTTP client
+- DHT sensor library (for DHT22)
+- ACS712 library (for current sensor)
+
+**Key Features to Implement:**
+- WiFi connection management
+- MQTT connection and reconnection logic
+- Sensor reading collection
+- Data formatting and transmission
+- Error handling and logging
+- OTA (Over-The-Air) updates (optional)
+
+---
+
 ## 📁 Project Structure
 
 ```
 Volt-Guard/
 │
-├── README.md                    # This file
+├── README.md                    # Project documentation (this file)
+├── .gitignore                   # Git ignore rules
+├── render.yaml                  # Render.com deployment configuration
 │
-├── backend/                     # Python Backend API
+├── backend/                     # Python Backend API (FastAPI)
 │   ├── app/
 │   │   ├── main.py             # FastAPI application entry point
 │   │   ├── models/             # Pydantic data models
-│   │   │   ├── device_model.py
-│   │   │   ├── energy_model.py
-│   │   │   ├── anomaly_model.py
-│   │   │   ├── prediction_model.py
-│   │   │   └── analytics_model.py
+│   │   │   ├── device_model.py      # Device data models
+│   │   │   ├── energy_model.py      # Energy reading models
+│   │   │   ├── anomaly_model.py     # Anomaly detection models
+│   │   │   ├── prediction_model.py  # Prediction models
+│   │   │   ├── analytics_model.py   # Analytics sensor models
+│   │   │   ├── fault_model.py       # Fault detection models
+│   │   │   ├── user_model.py        # User authentication models
+│   │   │   └── zone_model.py         # Zone/location models
 │   │   ├── services/           # Business logic & ML services
-│   │   │   ├── data_extraction.py
-│   │   │   ├── data_cleaning.py
-│   │   │   ├── feature_engineering.py
-│   │   │   ├── ml_service.py
-│   │   │   └── lstm_service.py
+│   │   │   └── (ML service implementations)
 │   │   └── utils/              # Utility functions
-│   │       ├── jwt_handler.py
-│   │       └── security.py
+│   │       ├── jwt_handler.py       # JWT token management
+│   │       └── security.py          # Security utilities
 │   ├── routes/                 # API route handlers
-│   │   ├── auth_routes.py      # Authentication endpoints
-│   │   ├── devices.py          # Device management
-│   │   ├── energy.py           # Energy data endpoints
-│   │   ├── prediction.py       # ML prediction endpoints
-│   │   ├── anomalies.py        # Anomaly detection endpoints
-│   │   ├── faults.py           # Fault detection endpoints
-│   │   ├── analytics.py        # Analytics endpoints
-│   │   ├── zones.py            # Zone management
-│   │   └── user_routes.py      # User management
-│   ├── database.py             # MongoDB connection
+│   │   ├── auth_routes.py      # Authentication endpoints (/auth/*)
+│   │   ├── devices.py          # Device management (/devices/*)
+│   │   ├── energy.py           # Energy data endpoints (/energy/*)
+│   │   ├── prediction.py       # ML prediction endpoints (/prediction/*)
+│   │   ├── anomalies.py        # Anomaly detection (/anomalies/*)
+│   │   ├── faults.py           # Fault detection (/faults/*)
+│   │   ├── analytics.py        # Analytics endpoints (/analytics/*)
+│   │   ├── zones.py            # Zone management (/zones/*)
+│   │   └── user_routes.py      # User management (/users/*)
+│   ├── database.py             # MongoDB connection and collections
 │   ├── requirements.txt        # Python dependencies
-│   ├── train_ml_models.py      # ML model training script
+│   ├── train_ml_models.py      # ML model training script (if exists)
 │   ├── models/                 # Trained ML models (generated)
-│   │   ├── anomaly_model.pkl
-│   │   ├── prediction_model.pkl
-│   │   ├── lstm_model.h5
-│   │   └── lstm_scalers.pkl
-│   └── clean_dataset.csv       # Cleaned training data (generated)
+│   │   ├── anomaly_model.pkl        # Isolation Forest model
+│   │   ├── prediction_model.pkl     # Random Forest model
+│   │   ├── lstm_model.h5             # LSTM neural network
+│   │   ├── lstm_best_model.h5       # Best LSTM model
+│   │   └── lstm_scalers.pkl         # LSTM feature scalers
+│   ├── tests/                  # Backend unit tests
+│   │   └── test_main.py
+│   └── venv/                   # Python virtual environment
 │
 ├── frontend/                    # Flutter Mobile Application
 │   ├── lib/
 │   │   ├── main.dart           # App entry point
 │   │   ├── pages/              # UI pages/screens
-│   │   │   ├── main_page.dart
-│   │   │   ├── devices_page.dart
-│   │   │   ├── analytics_page.dart
-│   │   │   └── zones_page.dart
+│   │   │   ├── main_page.dart         # Main navigation page
+│   │   │   ├── dashboard_page.dart    # Energy dashboard
+│   │   │   ├── devices_page.dart      # Device management
+│   │   │   ├── analytics_page.dart    # Analytics and charts
+│   │   │   ├── zones_page.dart        # Zone overview
+│   │   │   ├── zone_details_page.dart # Zone detail view
+│   │   │   ├── zone_manager_page.dart # Zone management
+│   │   │   └── profile_page.dart      # User profile
+│   │   ├── screens/            # Authentication screens
+│   │   │   ├── welcome_screen.dart    # Welcome/onboarding
+│   │   │   ├── login_screen.dart      # User login
+│   │   │   └── signup_screen.dart     # User registration
 │   │   ├── services/           # API services
-│   │   │   ├── api_config.dart
-│   │   │   ├── auth_service.dart
-│   │   │   ├── device_service.dart
-│   │   │   ├── analytics_service.dart
-│   │   │   └── zones_service.dart
-│   │   ├── models/             # Data models
-│   │   │   ├── energy_reading.dart
-│   │   │   └── sensor_reading.dart
-│   │   └── widgets/            # Reusable widgets
+│   │   │   ├── api_config.dart        # API configuration
+│   │   │   ├── auth_service.dart      # Authentication service
+│   │   │   ├── device_service.dart    # Device API calls
+│   │   │   ├── energy_service.dart    # Energy data API calls
+│   │   │   ├── analytics_service.dart # Analytics API calls
+│   │   │   ├── zones_service.dart     # Zone API calls
+│   │   │   ├── fault_detection_service.dart # Fault API calls
+│   │   │   └── user_service.dart      # User API calls
+│   │   └── models/             # Data models
+│   │       ├── energy_reading.dart    # Energy reading model
+│   │       └── sensor_reading.dart   # Sensor reading model
 │   ├── assets/                 # Images, fonts, resources
-│   ├── android/                # Android configuration
-│   ├── ios/                    # iOS configuration
-│   ├── pubspec.yaml            # Flutter dependencies
-│   └── test/                   # Frontend tests
+│   │   ├── images/             # App icons, splash screens
+│   │   └── fonts/              # Custom fonts
+│   ├── android/                # Android platform configuration
+│   ├── ios/                    # iOS platform configuration
+│   ├── web/                    # Web platform configuration
+│   ├── windows/                # Windows platform configuration
+│   ├── linux/                  # Linux platform configuration
+│   ├── macos/                  # macOS platform configuration
+│   ├── pubspec.yaml            # Flutter dependencies and config
+│   ├── generate_icon.py       # Icon generation script
+│   ├── generate_splash.py     # Splash screen generation script
+│   └── test/                   # Frontend unit tests
+│       └── widget_test.dart
 │
-└── voltguard-api/              # Legacy Flask API (optional)
-    └── app.py
+└── voltguard-api/              # Legacy Flask API (Alternative to MQTT)
+    ├── app.py                  # Flask application entry point
+    ├── requirements.txt        # Flask API dependencies
+    ├── pyproject.toml          # Python project configuration
+    └── runtime.txt             # Python runtime version
 ```
+
+### Key Directories Explained
+
+**Backend (`/backend`):**
+- Main FastAPI application with REST endpoints
+- ML model training and inference
+- MongoDB database integration
+- JWT authentication system
+
+**Frontend (`/frontend`):**
+- Cross-platform Flutter mobile application
+- User interface for all system features
+- API integration services
+- Platform-specific configurations
+
+**Legacy API (`/voltguard-api`):**
+- Flask-based alternative API for telemetry ingestion
+- Used when MQTT is not available
+- Simple HTTP POST endpoint for IoT devices
+- Deployed separately (e.g., on Render.com)
 
 ---
 
@@ -706,34 +1202,186 @@ flutter test test/widget_test.dart  # Run specific test
 
 ## 🚦 Deployment
 
-### Development
+### Development Environment
 
+**Backend:**
 ```bash
-# Backend
-uvicorn app.main:app --reload
+cd backend
+# Activate virtual environment
+venv\Scripts\activate  # Windows
+# or
+source venv/bin/activate  # Linux/Mac
 
-# Frontend
+# Run development server with auto-reload
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**Frontend:**
+```bash
+cd frontend
+# Install dependencies
+flutter pub get
+
+# Run on connected device/emulator
 flutter run
+
+# Run on specific platform
+flutter run -d android  # Android
+flutter run -d ios      # iOS (macOS only)
 ```
 
-### Production
-
+**Legacy API (Optional):**
 ```bash
-# Backend (with multiple workers)
+cd voltguard-api
+# Install dependencies
+pip install -r requirements.txt
+
+# Run Flask development server
+python app.py
+# or
+flask run
+```
+
+### Production Deployment
+
+**Backend (FastAPI):**
+
+Using Uvicorn with multiple workers:
+```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-
-# Frontend
-flutter build apk          # Android
-flutter build ios          # iOS
 ```
 
-### Docker (Recommended)
-
+Using Gunicorn with Uvicorn workers:
 ```bash
-# Build and run backend
-docker build -t voltguard-backend .
-docker run -p 8000:8000 voltguard-backend
+gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
+
+**Frontend:**
+
+Build production APK/IPA:
+```bash
+cd frontend
+
+# Android APK
+flutter build apk --release
+
+# Android App Bundle (for Play Store)
+flutter build appbundle --release
+
+# iOS (macOS only)
+flutter build ios --release
+```
+
+**Legacy API (Flask):**
+
+Using Gunicorn:
+```bash
+gunicorn -w 2 -b 0.0.0.0:$PORT app:app
+```
+
+### Cloud Deployment
+
+**Render.com Configuration:**
+
+The project includes `render.yaml` for Render.com deployment:
+
+```yaml
+services:
+  - type: web
+    name: voltguard-api
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT app:app
+    envVars:
+      - key: MONGO_URI_API
+      - key: API_KEY
+      - key: DB_NAME
+        value: volt_guard
+      - key: COLLECTION_NAME
+        value: occupancy_telemetry
+```
+
+**Environment Variables Required:**
+
+Backend (FastAPI):
+```env
+MONGO_URI=mongodb://localhost:27017  # or MongoDB Atlas connection string
+MONGODB_DB_NAME=volt_guard
+SECRET_KEY=your-secret-key-here
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
+DEBUG=False
+```
+
+Legacy API (Flask):
+```env
+MONGO_URI_API=mongodb://localhost:27017  # or MongoDB Atlas connection string
+API_KEY=your-api-key-here
+DB_NAME=volt_guard
+COLLECTION_NAME=occupancy_telemetry
+CURRENT_COLLECTION_NAME=energy_readings
+```
+
+### Docker Deployment (Optional)
+
+**Backend Dockerfile Example:**
+```dockerfile
+FROM python:3.9-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+**Build and Run:**
+```bash
+# Build Docker image
+docker build -t voltguard-backend ./backend
+
+# Run container
+docker run -p 8000:8000 --env-file .env voltguard-backend
+```
+
+### MongoDB Setup
+
+**Local MongoDB:**
+```bash
+# Install MongoDB
+# Windows: Download from mongodb.com
+# Linux: sudo apt-get install mongodb
+# Mac: brew install mongodb-community
+
+# Start MongoDB service
+mongod
+```
+
+**MongoDB Atlas (Cloud):**
+1. Create account at cloud.mongodb.com
+2. Create a free cluster
+3. Get connection string
+4. Update `MONGO_URI` in `.env` file
+
+### MQTT Broker Setup
+
+**Mosquitto Installation:**
+```bash
+# Windows: Download from mosquitto.org
+# Linux: sudo apt-get install mosquitto mosquitto-clients
+# Mac: brew install mosquitto
+
+# Start broker
+mosquitto -v
+```
+
+**Configuration:**
+- Default port: 1883
+- No authentication required for development
+- Configure authentication for production
 
 ---
 
