@@ -326,7 +326,17 @@ class _ProfilePageState extends State<ProfilePage> {
                       textInputAction: TextInputAction.done,
                       decoration: InputDecoration(
                         labelText: 'Bill Amount (Rs)',
-                        prefixIcon: const Icon(Icons.currency_rupee_rounded),
+                        prefixIcon: Padding(
+                          padding: const EdgeInsets.all(14.0),
+                          child: Text(
+                            'LKR',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
+                        ),
                         border: const OutlineInputBorder(),
                         hintText: 'Enter your electricity bill amount',
                         filled: true,
@@ -1336,13 +1346,19 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  ..._monthlyBills.take(3).map((bill) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: _buildBillItem(
-                          bill['month'],
-                          bill['amount'],
-                        ),
-                      )),
+                  ..._monthlyBills
+                      .take(3)
+                      .toList()
+                      .asMap()
+                      .entries
+                      .map((entry) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _buildBillItem(
+                              entry.value['month'],
+                              entry.value['amount'],
+                              entry.key,
+                            ),
+                          )),
                   if (_monthlyBills.length > 3)
                     TextButton(
                       onPressed: () {
@@ -1415,7 +1431,7 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _buildBillItem(String month, double amount) {
+  Widget _buildBillItem(String month, double amount, int index) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
@@ -1441,25 +1457,241 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              month,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  month,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Rs ${amount.toStringAsFixed(0)}',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.green.shade700,
+                  ),
+                ),
+              ],
             ),
           ),
-          Text(
-            'Rs ${amount.toStringAsFixed(0)}',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: Colors.green.shade700,
-            ),
+          IconButton(
+            icon:
+                Icon(Icons.edit_rounded, color: Colors.blue.shade600, size: 20),
+            onPressed: () => _editBill(index),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: Icon(Icons.delete_rounded,
+                color: Colors.red.shade600, size: 20),
+            onPressed: () => _deleteBill(index),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _editBill(int index) async {
+    final bill = _monthlyBills[index];
+    final amountController = TextEditingController(
+      text: bill['amount'].toStringAsFixed(0),
+    );
+    final formKey = GlobalKey<FormState>();
+
+    final result = await showModalBottomSheet<double>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 8,
+            bottom: bottomInset + 16,
+          ),
+          child: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Colors.blue.shade400, Colors.blue.shade600],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.edit_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Edit Bill',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          Text(
+                            bill['month'],
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                TextFormField(
+                  controller: amountController,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText: 'Bill Amount (Rs)',
+                    prefixIcon: Padding(
+                      padding: const EdgeInsets.all(14.0),
+                      child: Text(
+                        'LKR',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                    ),
+                    border: const OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Amount is required';
+                    }
+                    final amount = double.tryParse(value.trim());
+                    if (amount == null || amount <= 0) {
+                      return 'Enter a valid amount';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: () {
+                    if (!formKey.currentState!.validate()) return;
+                    Navigator.pop(
+                      context,
+                      double.parse(amountController.text.trim()),
+                    );
+                  },
+                  icon: const Icon(Icons.save_rounded),
+                  label: const Text('Update Bill'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    backgroundColor: Colors.blue,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (result != null) {
+      setState(() {
+        _monthlyBills[index]['amount'] = result;
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Bill updated successfully'),
+          backgroundColor: Colors.blue,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteBill(int index) async {
+    final bill = _monthlyBills[index];
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Text(
+          'Delete Bill',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          'Are you sure you want to delete the bill for ${bill['month']}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() {
+        _monthlyBills.removeAt(index);
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Bill deleted successfully'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      );
+    }
   }
 
   void _showAllBillsDialog(BuildContext context) {
@@ -1555,22 +1787,31 @@ class _ProfilePageState extends State<ProfilePage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'Added on ${bill['date']}',
+                                    'Rs ${bill['amount'].toStringAsFixed(0)}',
                                     style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade600,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.green.shade700,
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                            Text(
-                              'Rs ${bill['amount'].toStringAsFixed(0)}',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.green.shade700,
-                              ),
+                            IconButton(
+                              icon: Icon(Icons.edit_rounded,
+                                  color: Colors.blue.shade600),
+                              onPressed: () {
+                                Navigator.pop(context);
+                                _editBill(index);
+                              },
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.delete_rounded,
+                                  color: Colors.red.shade600),
+                              onPressed: () {
+                                Navigator.pop(context);
+                                _deleteBill(index);
+                              },
                             ),
                           ],
                         ),
