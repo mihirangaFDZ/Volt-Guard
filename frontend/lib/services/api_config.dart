@@ -24,6 +24,7 @@ class ApiConfig {
   static const String authEndpoint = '/auth/login'; 
   static const String signupEndpoint = '/users/signup';
   static const String faultsEndpoint = '/faults';
+  static const String optimizationEndpoint = '/optimization';
 
   
   // Request timeout duration

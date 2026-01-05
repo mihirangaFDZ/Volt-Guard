@@ -9,6 +9,14 @@ from app.models.analytics_model import (
     RecommendationsResponse,
 )
 
+# Import AI optimization services
+try:
+    from app.services.energy_optimizer import EnergyOptimizer
+    from app.services.dataset_generator import DatasetGenerator
+    AI_AVAILABLE = True
+except ImportError:
+    AI_AVAILABLE = False
+
 router = APIRouter(
     prefix="/analytics",
     tags=["Analytics"],
@@ -76,13 +84,46 @@ def get_occupancy_stats(limit: int = 50, module: Optional[str] = None, location:
             "is_currently_occupied": False,
         }
 
-    # Count occupied and vacant readings
+    # Check if sensors are offline (latest reading is too old)
+    now = datetime.now(timezone.utc)
+    offline_threshold_minutes = 30  # Consider sensor offline if no reading in last 30 minutes
+    
+    latest = docs[0]
+    ts = latest.get("received_at") or latest.get("receivedAt") or latest.get("timestamp")
+    is_sensor_offline = False
+    
+    if ts is not None:
+        dt = _to_datetime(ts)
+        if dt is not None:
+            # Convert to UTC for comparison
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
+            time_diff = (now - dt).total_seconds() / 60  # minutes
+            is_sensor_offline = time_diff > offline_threshold_minutes
+        else:
+            is_sensor_offline = True  # Invalid timestamp
+    else:
+        is_sensor_offline = True  # No timestamp
+    
+    # If sensor is offline, set occupancy to vacant and all counts to reflect offline status
+    if is_sensor_offline:
+        return {
+            "total_readings": len(docs),
+            "occupied_count": 0,
+            "vacant_count": len(docs),
+            "occupied_percentage": 0.0,
+            "vacant_percentage": 100.0,
+            "is_currently_occupied": False,
+        }
+
+    # Count occupied and vacant readings (sensors are online)
     occupied_count = sum(1 for d in docs if d.get("pir") == 1 or d.get("rcwl") == 1)
     vacant_count = len(docs) - occupied_count
     total_readings = len(docs)
     
     # Latest reading to determine current status
-    latest = docs[0]
     is_currently_occupied = latest.get("pir") == 1 or latest.get("rcwl") == 1
 
     return {
@@ -116,15 +157,49 @@ def get_latest_readings(limit: int = 50, module: Optional[str] = None, location:
     )   
 
     normalized = []
+    now = datetime.now(timezone.utc)
+    # Consider sensor offline if no reading in last 30 minutes
+    offline_threshold_minutes = 30
+    
     for doc in cursor:
         ts = doc.get("received_at") or doc.get("receivedAt") or doc.get("timestamp")
         if ts is not None:
             dt = _to_datetime(ts)
             if dt is not None:
+                # Convert to UTC for comparison
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+                
+                # Check if sensor is offline (reading is older than threshold)
+                time_diff = (now - dt).total_seconds() / 60  # minutes
+                is_offline = time_diff > offline_threshold_minutes
+                
                 # Convert to Sri Lankan time and return as ISO string
-                doc["receivedAt"] = dt.isoformat()
+                doc["receivedAt"] = dt.astimezone(SRI_LANKA_TZ).isoformat()
             else:
                 doc["receivedAt"] = ts
+                is_offline = True  # Invalid timestamp, consider offline
+        else:
+            is_offline = True  # No timestamp, consider offline
+        
+        # If sensor is offline, set all values to 0 and occupancy to vacant
+        if is_offline:
+            doc["temperature"] = 0
+            doc["humidity"] = 0
+            doc["pir"] = 0
+            doc["rcwl"] = 0
+            doc["rssi"] = 0 if doc.get("rssi") is not None else None  # Keep None if was None
+            doc["occupied"] = False
+            doc["is_occupied"] = False
+        else:
+            # Ensure occupied status is correctly set based on sensors
+            pir = doc.get("pir", 0) or 0
+            rcwl = doc.get("rcwl", 0) or 0
+            doc["occupied"] = bool(pir == 1 or rcwl == 1)
+            doc["is_occupied"] = bool(pir == 1 or rcwl == 1)
+        
         normalized.append(doc)
 
     return normalized
@@ -147,140 +222,82 @@ def _to_datetime(value):
     return dt.astimezone(SRI_LANKA_TZ)
 
 
-def _derive_recommendations(docs: List[dict]) -> List[Recommendation]:
+def _get_ai_recommendations(module: Optional[str] = None, location: Optional[str] = None) -> List[Recommendation]:
     """
-    Derive actionable recommendations from sensor readings.
-    Analyzes patterns across multiple readings to provide intelligent recommendations.
+    Get AI-driven recommendations and convert to Recommendation format.
+    Returns empty list if AI is not available or model is not trained.
     """
-    if not docs:
+    if not AI_AVAILABLE:
         return []
-
-    # Sort by timestamp (most recent first)
-    latest = docs[0]
-    temps = [d.get("temperature") for d in docs if isinstance(d.get("temperature"), (int, float))]
-    hums = [d.get("humidity") for d in docs if isinstance(d.get("humidity"), (int, float))]
-    avg_temp = sum(temps) / len(temps) if temps else None
-    avg_hum = sum(hums) / len(hums) if hums else None
-
-    latest_time = _to_datetime(latest.get("received_at") or latest.get("receivedAt") or latest.get("timestamp"))
-    last_occ = next((d for d in docs if d.get("pir") == 1 or d.get("rcwl") == 1), None)
-    last_occ_time = _to_datetime(
-        last_occ.get("received_at") or last_occ.get("receivedAt") or last_occ.get("timestamp")
-    ) if last_occ else None
-    vacancy_minutes = 0
-    if latest_time and last_occ_time:
-        vacancy_minutes = int(max((latest_time - last_occ_time).total_seconds() // 60, 0))
-
-    rssi = latest.get("rssi") if isinstance(latest.get("rssi"), int) else None
-    if rssi is not None:
-        if rssi >= -60:
-            rssi_label = "Strong"
-        elif rssi >= -75:
-            rssi_label = "Fair"
-        else:
-            rssi_label = "Weak"
-    else:
-        rssi_label = "Unknown"
-
-    recs: List[Recommendation] = []
-
-    # Recommendation 1: Turn off AC in vacant room (High priority)
-    temp_val = latest.get("temperature")
-    if (latest.get("pir") == 0 and latest.get("rcwl") == 0) and isinstance(temp_val, (int, float)):
-        if temp_val > 31 and vacancy_minutes >= 30:
-            recs.append(
+    
+    try:
+        optimizer = EnergyOptimizer()
+        if not optimizer.load_model():
+            # Model not trained, return empty list
+            return []
+        
+        # Generate clean dataset
+        generator = DatasetGenerator()
+        _, featured_df = generator.generate_clean_dataset(
+            days=2,
+            location=location,
+            module=module
+        )
+        
+        if featured_df.empty:
+            return []
+        
+        # Generate AI recommendations
+        ai_recs = optimizer.generate_recommendations(
+            featured_df,
+            threshold_high=1000.0,
+            threshold_low=100.0
+        )
+        
+        # Convert AI recommendations to Recommendation format
+        converted_recs = []
+        for ai_rec in ai_recs:
+            # Map severity string to RecommendationSeverity enum
+            severity_map = {
+                'high': RecommendationSeverity.high,
+                'medium': RecommendationSeverity.medium,
+                'low': RecommendationSeverity.low,
+            }
+            severity = severity_map.get(ai_rec.get('severity', 'low').lower(), RecommendationSeverity.low)
+            
+            # Add savings info to detail if available
+            detail = ai_rec.get('message', '')
+            savings = ai_rec.get('estimated_savings', 0)
+            if savings > 0:
+                detail += f" (Potential savings: {savings:.2f} kWh/day)"
+            
+            converted_recs.append(
                 Recommendation(
-                    title="Turn off AC in vacant room",
-                    detail=f"Vacant for {vacancy_minutes} min at {temp_val:.1f}°C.",
-                    cta="Send Alert",
-                    severity=RecommendationSeverity.high,
+                    title=ai_rec.get('title', ''),
+                    detail=detail,
+                    cta='View Details',
+                    severity=severity,
                 )
             )
-
-    # Recommendation 2: Align motion sensing (check pattern across recent readings)
-    # Check if there's a pattern of RCWL=1 while PIR=0 in recent readings
-    recent_readings = docs[:10]  # Check last 10 readings
-    rcwl_pir_mismatch_count = sum(
-        1 for d in recent_readings
-        if d.get("rcwl") == 1 and d.get("pir") == 0
-    )
-    if rcwl_pir_mismatch_count > 0:
-        recs.append(
-            Recommendation(
-                title="Align motion sensing",
-                detail=f"RCWL detected motion while PIR didn't in {rcwl_pir_mismatch_count} of last {len(recent_readings)} readings. Reposition sensor to reduce false motion.",
-                cta="Inspect",
-                severity=RecommendationSeverity.medium,
-            )
-        )
-
-    # Recommendation 3: Check link quality (Medium priority)
-    if rssi_label != "Strong":
-        rssi_detail = f"RSSI {rssi_label}"
-        if rssi is not None:
-            rssi_detail += f" ({rssi} dBm)"
-        rssi_detail += ". Move gateway or adjust antenna."
-        recs.append(
-            Recommendation(
-                title="Check link quality",
-                detail=rssi_detail,
-                cta="Check Link",
-                severity=RecommendationSeverity.medium,
-            )
-        )
-
-    # Recommendation 4: Comfort guardrails (Low priority - informational)
-    if isinstance(temp_val, (int, float)):
-        recs.append(
-            Recommendation(
-                title="Comfort guardrails",
-                detail="Keep 24-27°C occupied; allow 29-30°C when vacant to save energy.",
-                cta="Apply",
-                severity=RecommendationSeverity.low,
-            )
-        )
-
-    # Recommendation 5: Review comfort drift (Low priority - informational)
-    if avg_temp is not None and avg_hum is not None:
-        recs.append(
-            Recommendation(
-                title="Review comfort drift",
-                detail=f"Avg {avg_temp:.1f}°C / {avg_hum:.0f}% RH over last {len(docs)} readings.",
-                cta="Review",
-                severity=RecommendationSeverity.low,
-            )
-        )
-
-    # Sort by severity: high -> medium -> low
-    severity_order = {RecommendationSeverity.high: 0, RecommendationSeverity.medium: 1, RecommendationSeverity.low: 2}
-    recs.sort(key=lambda r: severity_order.get(r.severity, 3))
-
-    return recs
+        
+        return converted_recs
+    
+    except Exception:
+        # If AI recommendations fail, just return empty list (non-blocking)
+        return []
 
 
 @router.get("/recommendations", response_model=RecommendationsResponse)
 def get_recommendations(limit: int = 50, module: Optional[str] = None, location: Optional[str] = None):
-    query = {}
-    if module:
-        query["module"] = module
-    if location:
-        query["location"] = location
-
-    cursor = (
-        analytics_col
-        .find(query, {"_id": 0})
-        .sort([
-            ("received_at", -1),
-            ("receivedAt", -1),
-            ("timestamp", -1),
-            ("_id", -1),
-        ])
-        .limit(limit)
-    )
-
-    docs = list(cursor)
-    if not docs:
-        return RecommendationsResponse(recommendations=[], count=0)
-
-    recs = _derive_recommendations(docs)
-    return RecommendationsResponse(recommendations=recs, count=len(recs))
+    """
+    Get AI-based energy optimization recommendations.
+    Returns only AI-driven recommendations from the trained model.
+    """
+    # Get AI-based recommendations only
+    ai_recs = _get_ai_recommendations(module=module, location=location)
+    
+    # Sort by severity (high -> medium -> low)
+    severity_order = {RecommendationSeverity.high: 0, RecommendationSeverity.medium: 1, RecommendationSeverity.low: 2}
+    ai_recs.sort(key=lambda r: severity_order.get(r.severity, 3))
+    
+    return RecommendationsResponse(recommendations=ai_recs, count=len(ai_recs))

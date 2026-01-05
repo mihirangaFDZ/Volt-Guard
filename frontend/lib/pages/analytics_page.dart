@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../models/sensor_reading.dart';
 import '../services/analytics_service.dart';
+import '../services/optimization_service.dart';
 
 /// Component-focused analytics page for occupancy, comfort, sensor health, and recommendations
 /// using the provided IoT fields (pir/rcwl, temperature, humidity, rssi, uptime, timestamps).
@@ -15,6 +16,7 @@ class AnalyticsPage extends StatefulWidget {
 
 class _AnalyticsPageState extends State<AnalyticsPage> {
   final AnalyticsService _analyticsService = AnalyticsService();
+  final OptimizationService _optimizationService = OptimizationService();
 
   static const int _maxActiveRecs = 3;
   List<SensorReading> _readings = [];
@@ -23,6 +25,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   List<_RecItem> _activeRecItems = [];
   List<_Recommendation> _backlogRecs = [];
   List<_CompletedEntry> _history = [];
+  
+  // Store original AI recommendations for detailed view
+  Map<String, AIRecommendation> _aiRecDetailsMap = {};
   
   // Filter state
   String? _selectedLocation;
@@ -33,6 +38,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   
   // Occupancy stats
   Map<String, dynamic>? _occupancyStats;
+  
+  // AI Recommendations
+  OptimizationResponse? _aiRecommendations;
+  bool _loadingAIRecommendations = false;
 
   @override
   void initState() {
@@ -92,19 +101,87 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         stats = _deriveStats(data);
       }
       if (!mounted) return;
+      
+      // Fetch AI recommendations
+      OptimizationResponse? aiRecsResponse;
+      try {
+        setState(() {
+          _loadingAIRecommendations = true;
+        });
+        aiRecsResponse = await _optimizationService.fetchRecommendations(
+          days: 2,
+          location: _selectedLocation,
+          module: _selectedModule,
+        );
+      } catch (e) {
+        // If AI recommendations fail, show empty list
+        if (!mounted) return;
+        setState(() {
+          _loadingAIRecommendations = false;
+          _aiRecommendations = null;
+        });
+      } finally {
+        if (!mounted) return;
+        if (_loadingAIRecommendations) {
+          setState(() {
+            _loadingAIRecommendations = false;
+            _aiRecommendations = aiRecsResponse;
+          });
+        }
+      }
+      
+      // Convert AI recommendations to _Recommendation format
+      List<_Recommendation> aiRecs = [];
+      if (aiRecsResponse != null && aiRecsResponse.recommendations.isNotEmpty) {
+        for (final aiRec in aiRecsResponse.recommendations) {
+          // Determine color and icon based on severity
+          Color recColor;
+          IconData recIcon;
+          switch (aiRec.severity.toLowerCase()) {
+            case 'high':
+              recColor = Colors.red;
+              recIcon = Icons.priority_high;
+              break;
+            case 'medium':
+              recColor = Colors.orange;
+              recIcon = Icons.info;
+              break;
+            default:
+              recColor = Colors.blue;
+              recIcon = Icons.lightbulb_outline;
+          }
+          
+          // Add savings info to detail if available
+          String detail = aiRec.message;
+          if (aiRec.estimatedSavings > 0) {
+            detail += ' (Potential savings: ${aiRec.estimatedSavings.toStringAsFixed(2)} kWh/day)';
+          }
+          
+          // Create a unique ID for this recommendation
+          final recId = '${aiRec.type}_${aiRec.title}_${DateTime.now().millisecondsSinceEpoch}_${aiRecs.length}';
+          
+          // Store original AI recommendation for detailed view
+          _aiRecDetailsMap[recId] = aiRec;
+          
+          aiRecs.add(_Recommendation(
+            title: aiRec.title,
+            detail: detail,
+            cta: 'View Details',
+            color: recColor,
+            icon: recIcon,
+            id: recId, // Store ID for lookup
+          ));
+        }
+      }
+      
+      if (!mounted) return;
       setState(() {
         _readings = data;
         _occupancyStats = occupancyStats;
-        if (stats != null) {
-          final recs = _buildRecList(stats!);
-          _activeRecItems = recs.take(_maxActiveRecs).map((r) => _RecItem(rec: r)).toList();
-          _backlogRecs = recs.skip(_maxActiveRecs).toList();
-          _history = [];
-        } else {
-          _activeRecItems = [];
-          _backlogRecs = [];
-          _history = [];
-        }
+        final recItems = aiRecs.map((r) => _RecItem(rec: r)).toList();
+        _activeRecItems = recItems.take(_maxActiveRecs).toList();
+        _backlogRecs = recItems.skip(_maxActiveRecs).map((item) => item.rec).toList();
+        _history = [];
       });
     } catch (e) {
       if (!mounted) return;
@@ -643,6 +720,218 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
+  Widget _buildAIRecommendations() {
+    if (_loadingAIRecommendations) {
+      return Card(
+        elevation: 2,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 16),
+              Text(
+                'Loading AI recommendations...',
+                style: TextStyle(color: Colors.grey[600], fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_aiRecommendations == null || _aiRecommendations!.recommendations.isEmpty) {
+      return const SizedBox.shrink(); // Hide if no recommendations
+    }
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.psychology, color: Colors.purple),
+                SizedBox(width: 8),
+                Text(
+                  'AI Energy Recommendations',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            if (_aiRecommendations!.potentialSavingsKwhPerDay > 0) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green[200]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.savings, color: Colors.green[700], size: 24),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Potential Savings',
+                            style: TextStyle(
+                              color: Colors.green[700],
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${_aiRecommendations!.potentialSavingsKwhPerDay.toStringAsFixed(2)} kWh/day',
+                            style: TextStyle(
+                              color: Colors.green[700],
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_aiRecommendations!.currentEnergyWatts != null)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            'Current',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 11,
+                            ),
+                          ),
+                          Text(
+                            '${_aiRecommendations!.currentEnergyWatts!.toStringAsFixed(0)} W',
+                            style: TextStyle(
+                              color: Colors.grey[700],
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            ..._aiRecommendations!.recommendations.map((rec) => _buildAIRecommendationTile(rec)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAIRecommendationTile(AIRecommendation rec) {
+    Color severityColor;
+    IconData iconData;
+    
+    switch (rec.severity.toLowerCase()) {
+      case 'high':
+        severityColor = Colors.red;
+        iconData = Icons.priority_high;
+        break;
+      case 'medium':
+        severityColor = Colors.orange;
+        iconData = Icons.info;
+        break;
+      default:
+        severityColor = Colors.blue;
+        iconData = Icons.lightbulb_outline;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: severityColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(iconData, color: severityColor, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        rec.title,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: severityColor.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        rec.severity.toUpperCase(),
+                        style: TextStyle(
+                          color: severityColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  rec.message,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                if (rec.estimatedSavings > 0) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.savings, size: 14, color: Colors.green[700]),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${rec.estimatedSavings.toStringAsFixed(2)} kWh/day',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.green[700],
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildRecentReadings(List<SensorReading> readings) {
     final List<SensorReading> latestFive = List.of(readings)
       ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
@@ -753,6 +1042,13 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     final _RecItem item = _activeRecItems[index];
     if (item.completed) return;
 
+    // If this recommendation has an ID, show detailed view
+    if (item.rec.id != null && _aiRecDetailsMap.containsKey(item.rec.id)) {
+      _showRecommendationDetails(item.rec.id!);
+      return;
+    }
+
+    // Otherwise, mark as completed (legacy behavior)
     // Sri Lankan timezone (UTC+5:30)
     const Duration sriLankaOffset = Duration(hours: 5, minutes: 30);
     final DateTime nowSriLanka = DateTime.now().toUtc().add(sriLankaOffset);
@@ -767,6 +1063,295 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Completed: ${item.rec.title}')),
     );
+  }
+
+  void _showRecommendationDetails(String recId) {
+    final aiRec = _aiRecDetailsMap[recId];
+    if (aiRec == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.7,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (context, scrollController) {
+            return SingleChildScrollView(
+              controller: scrollController,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _getSeverityColor(aiRec.severity).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          _getSeverityIcon(aiRec.severity),
+                          color: _getSeverityColor(aiRec.severity),
+                          size: 28,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              aiRec.title,
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _getSeverityColor(aiRec.severity).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                aiRec.severity.toUpperCase(),
+                                style: TextStyle(
+                                  color: _getSeverityColor(aiRec.severity),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // Message
+                  Text(
+                    aiRec.message,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // Estimated Savings
+                  if (aiRec.estimatedSavings > 0) ...[
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.green[200]!),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.savings, color: Colors.green[700], size: 32),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Potential Savings',
+                                  style: TextStyle(
+                                    color: Colors.green[700],
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${aiRec.estimatedSavings.toStringAsFixed(2)} kWh/day',
+                                  style: TextStyle(
+                                    color: Colors.green[700],
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                  
+                  // Detailed Information
+                  const Text(
+                    'Detailed Information',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  
+                  // Location and Module
+                  if (aiRec.location != null || aiRec.module != null) ...[
+                    _buildDetailRow('Location', aiRec.location ?? 'Unknown'),
+                    _buildDetailRow('Module', aiRec.module ?? 'Unknown'),
+                    const SizedBox(height: 8),
+                  ],
+                  
+                  // Energy Information
+                  if (aiRec.currentEnergyWatts != null)
+                    _buildDetailRow('Current Energy', '${aiRec.currentEnergyWatts!.toStringAsFixed(2)} W'),
+                  
+                  // Occupancy Information
+                  const Divider(),
+                  const Text(
+                    'Occupancy Status',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (aiRec.isOccupied != null)
+                    _buildDetailRow(
+                      'Status',
+                      aiRec.isOccupied! ? 'Occupied' : 'Vacant',
+                      valueColor: aiRec.isOccupied! ? Colors.green : Colors.orange,
+                    ),
+                  if (aiRec.vacancyDurationMinutes != null && (aiRec.isOccupied == false))
+                    _buildDetailRow(
+                      'Vacancy Duration',
+                      _formatDuration(aiRec.vacancyDurationMinutes!),
+                    ),
+                  if (aiRec.pir != null)
+                    _buildDetailRow('PIR Sensor', aiRec.pir == 1 ? 'Motion Detected' : 'No Motion'),
+                  if (aiRec.rcwl != null)
+                    _buildDetailRow('RCWL Sensor', aiRec.rcwl == 1 ? 'Motion Detected' : 'No Motion'),
+                  
+                  // Environmental Information
+                  if (aiRec.currentTemperature != null || aiRec.currentHumidity != null) ...[
+                    const SizedBox(height: 8),
+                    const Divider(),
+                    const Text(
+                      'Environmental Conditions',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  if (aiRec.currentTemperature != null)
+                    _buildDetailRow(
+                      'Temperature',
+                      '${aiRec.currentTemperature!.toStringAsFixed(1)}°C',
+                      valueColor: _getTempColor(aiRec.currentTemperature!),
+                    ),
+                  if (aiRec.currentHumidity != null)
+                    _buildDetailRow(
+                      'Humidity',
+                      '${aiRec.currentHumidity!.toStringAsFixed(0)}%',
+                      valueColor: _getHumidityColor(aiRec.currentHumidity!),
+                    ),
+                  
+                  const SizedBox(height: 24),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value, {Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: valueColor ?? Colors.grey[900],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(int minutes) {
+    if (minutes < 60) {
+      return '$minutes minutes';
+    } else if (minutes < 1440) {
+      final hours = minutes ~/ 60;
+      final mins = minutes % 60;
+      return mins > 0 ? '$hours hours $mins minutes' : '$hours hours';
+    } else {
+      final days = minutes ~/ 1440;
+      final hours = (minutes % 1440) ~/ 60;
+      return hours > 0 ? '$days days $hours hours' : '$days days';
+    }
+  }
+
+  Color _getSeverityColor(String severity) {
+    switch (severity.toLowerCase()) {
+      case 'high':
+        return Colors.red;
+      case 'medium':
+        return Colors.orange;
+      default:
+        return Colors.blue;
+    }
+  }
+
+  IconData _getSeverityIcon(String severity) {
+    switch (severity.toLowerCase()) {
+      case 'high':
+        return Icons.priority_high;
+      case 'medium':
+        return Icons.info;
+      default:
+        return Icons.lightbulb_outline;
+    }
+  }
+
+  Color _getTempColor(double temp) {
+    if (temp > 30) return Colors.red;
+    if (temp >= 27) return Colors.orange;
+    return Colors.green;
+  }
+
+  Color _getHumidityColor(double humidity) {
+    if (humidity > 70) return Colors.orange;
+    if (humidity < 40) return Colors.amber;
+    return Colors.green;
   }
 
   Widget _readingRow(SensorReading reading) {
@@ -960,6 +1545,7 @@ class _Recommendation {
     required this.cta,
     required this.color,
     required this.icon,
+    this.id,
   });
 
   final String title;
@@ -967,6 +1553,7 @@ class _Recommendation {
   final String cta;
   final Color color;
   final IconData icon;
+  final String? id; // ID to lookup detailed AI recommendation
 }
 
 class _RecItem {
@@ -1038,38 +1625,4 @@ _DerivedStats _deriveStats(List<SensorReading> readings) {
   );
 }
 
-List<_Recommendation> _buildRecList(_DerivedStats stats) {
-  final List<_Recommendation> recs = [];
-  if (!stats.isOccupied && stats.latestTemp > 31 && stats.vacancyMinutes >= 30) {
-    recs.add(_Recommendation(
-      title: 'Turn off AC in vacant room',
-      detail: 'Vacant for ${stats.vacancyMinutes} min at ${stats.latestTemp.toStringAsFixed(1)}°C.',
-      cta: 'Send Alert',
-      color: Colors.red,
-      icon: Icons.ac_unit,
-    ));
-  }
-  recs.add(_Recommendation(
-    title: 'Align motion sensing',
-    detail: 'RCWL often 1 while PIR 0. Reposition sensor to reduce false motion.',
-    cta: 'Inspect',
-    color: Colors.indigo,
-    icon: Icons.sensors,
-  ));
-  recs.add(_Recommendation(
-    title: 'Check link quality',
-    detail: 'RSSI ${stats.signalLabel}. Move gateway or adjust antenna.',
-    cta: 'Check Link',
-    color: stats.signalColor,
-    icon: Icons.network_check,
-  ));
-  recs.add(_Recommendation(
-    title: 'Comfort guardrails',
-    detail: 'Keep 24-27°C occupied; allow 29-30°C when vacant to save energy.',
-    cta: 'Apply',
-    color: Colors.teal,
-    icon: Icons.rule,
-  ));
-  return recs;
-}
 
