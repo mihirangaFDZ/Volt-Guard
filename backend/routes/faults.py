@@ -8,7 +8,7 @@ from database import (
     faults_col,
     analytics_col,
     prediction_col,
-    anomalies_col,
+    anomaly_col,
 )
 from app.models.fault_model import Fault, FaultSummary
 from utils.jwt_handler import get_current_user
