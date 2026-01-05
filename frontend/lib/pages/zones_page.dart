@@ -116,8 +116,6 @@ class _ZonesPageState extends State<ZonesPage> {
                         children: [
                           _buildSummarySection(),
                           const SizedBox(height: 24),
-                          _buildQuickActionsSection(),
-                          const SizedBox(height: 24),
                           _buildHighlightsSection(),
                           const SizedBox(height: 24),
                           _buildPerformanceSection(),
@@ -150,58 +148,79 @@ class _ZonesPageState extends State<ZonesPage> {
   }
 
   Widget _buildSummarySection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Energy Overview",
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0A1E2F), Color(0xFF0F2F46)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _buildStatCard(
-                icon: Icons.bolt,
-                title: "Total Power",
-                value: "${(totalPowerUsage / 1000).toStringAsFixed(2)} kW",
-                color: const Color(0xFFFBBF24),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x330B1220), blurRadius: 18, offset: Offset(0, 10)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: const [
+              Text(
+                "Energy Overview",
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Colors.white),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildStatCard(
-                icon: Icons.attach_money,
-                title: "Monthly Cost",
-                value: "LKR ${totalMonthlyCost.toStringAsFixed(0)}",
-                color: const Color(0xFF00C853),
+              Icon(Icons.grid_view_rounded, color: Colors.white70, size: 18),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatCard(
+                  icon: Icons.bolt,
+                  title: "Total Power",
+                  value: "${(totalPowerUsage / 1000).toStringAsFixed(2)} kW",
+                  color: const Color(0xFFFBBF24),
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _buildStatCard(
-                icon: Icons.people,
-                title: "Occupied Zones",
-                value: "$occupiedZones/${zones.length}",
-                color: const Color(0xFF4A90E2),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildStatCard(
+                  icon: Icons.attach_money,
+                  title: "Monthly Cost",
+                  value: "LKR ${totalMonthlyCost.toStringAsFixed(0)}",
+                  color: const Color(0xFF22C55E),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildStatCard(
-                icon: Icons.devices,
-                title: "Total Devices",
-                value: "${zones.fold<int>(0, (sum, z) => sum + z.deviceCount)}",
-                color: const Color(0xFFE91E63),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatCard(
+                  icon: Icons.people,
+                  title: "Occupied Zones",
+                  value: "$occupiedZones/${zones.length}",
+                  color: const Color(0xFF60A5FA),
+                ),
               ),
-            ),
-          ],
-        ),
-      ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildStatCard(
+                  icon: Icons.devices,
+                  title: "Total Devices",
+                  value: "${zones.fold<int>(0, (sum, z) => sum + z.deviceCount)}",
+                  color: const Color(0xFFE879F9),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -214,87 +233,35 @@ class _ZonesPageState extends State<ZonesPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.28)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x1A000000), blurRadius: 14, offset: Offset(0, 10)),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 24),
-          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.white, size: 22),
+          ),
+          const SizedBox(height: 10),
           Text(
             title,
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            style: const TextStyle(fontSize: 12, color: Colors.white70),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActionsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Quick Actions",
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _buildActionButton(
-                icon: Icons.power_settings_new,
-                label: "All Off",
-                color: const Color(0xFFEF5350),
-                onPressed: () => _showActionSnackbar("All devices turned OFF"),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildActionButton(
-                icon: Icons.power,
-                label: "All On",
-                color: const Color(0xFF4CAF50),
-                onPressed: () => _showActionSnackbar("All devices turned ON"),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildActionButton(
-                icon: Icons.eco,
-                label: "Power Saver",
-                color: const Color(0xFF2196F3),
-                onPressed: () => _showActionSnackbar("Power Saver mode activated"),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onPressed,
-  }) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 18),
-      label: Text(label, style: const TextStyle(fontSize: 12)),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }
@@ -307,10 +274,19 @@ class _ZonesPageState extends State<ZonesPage> {
           decoration: InputDecoration(
             hintText: "Search rooms or types",
             prefixIcon: const Icon(Icons.search),
+            suffixIcon: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2563EB),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.tune, color: Colors.white, size: 18),
+            ),
             filled: true,
             fillColor: Colors.white,
             contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
           ),
           onChanged: (v) => setState(() => _search = v),
         ),
@@ -319,21 +295,9 @@ class _ZonesPageState extends State<ZonesPage> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            FilterChip(
-              label: const Text("Has alerts"),
-              selected: _onlyAlerts,
-              onSelected: (v) => setState(() => _onlyAlerts = v),
-            ),
-            FilterChip(
-              label: const Text("Occupied"),
-              selected: _onlyOccupied,
-              onSelected: (v) => setState(() => _onlyOccupied = v),
-            ),
-            FilterChip(
-              label: const Text("Non-compliant"),
-              selected: _onlyNonCompliant,
-              onSelected: (v) => setState(() => _onlyNonCompliant = v),
-            ),
+            _buildFilterChip("Has alerts", Icons.warning_amber_rounded, _onlyAlerts, (v) => setState(() => _onlyAlerts = v)),
+            _buildFilterChip("Occupied", Icons.event_available, _onlyOccupied, (v) => setState(() => _onlyOccupied = v)),
+            _buildFilterChip("Non-compliant", Icons.policy, _onlyNonCompliant, (v) => setState(() => _onlyNonCompliant = v)),
             DropdownButton<String>(
               value: _sort,
               items: const [
@@ -348,6 +312,24 @@ class _ZonesPageState extends State<ZonesPage> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildFilterChip(String label, IconData icon, bool selected, ValueChanged<bool> onSelected) {
+    return FilterChip(
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16),
+          const SizedBox(width: 6),
+          Text(label),
+        ],
+      ),
+      selected: selected,
+      onSelected: onSelected,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      selectedColor: const Color(0xFF2563EB).withOpacity(0.15),
+      checkmarkColor: const Color(0xFF2563EB),
     );
   }
 
@@ -976,23 +958,55 @@ class _ZonesPageState extends State<ZonesPage> {
 
 
   Widget _buildZonesListSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Zones",
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0A1E2F), Color(0xFF102B3F)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        const SizedBox(height: 12),
-        _buildRoomTableHeader(),
-        const SizedBox(height: 8),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: _filteredZones.length,
-          itemBuilder: (context, index) => _buildRoomRow(_filteredZones[index]),
-        ),
-      ],
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x330B1220), blurRadius: 16, offset: Offset(0, 10)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Zones",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Text(
+                  "${_filteredZones.length} active",
+                  style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildRoomTableHeader(),
+          const SizedBox(height: 8),
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _filteredZones.length,
+            itemBuilder: (context, index) => _buildRoomRow(_filteredZones[index]),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1000,16 +1014,17 @@ class _ZonesPageState extends State<ZonesPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(8),
+        color: Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Row(
         children: const [
-          Expanded(flex: 2, child: Text("Room", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-          Expanded(child: Text("Eff.", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-          Expanded(child: Text("Waste", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-          Expanded(child: Text("Peak", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-          Expanded(child: Text("Status", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+          Expanded(flex: 2, child: Text("Room", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white70))),
+          Expanded(child: Text("Eff.", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white70))),
+          Expanded(child: Text("Waste", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white70))),
+          Expanded(child: Text("Peak", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white70))),
+          Expanded(child: Text("Status", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white70))),
         ],
       ),
     );
@@ -1026,9 +1041,16 @@ class _ZonesPageState extends State<ZonesPage> {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.grey[200]!),
+          gradient: const LinearGradient(
+            colors: [Color(0xFF0D2335), Color(0xFF12374E)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withOpacity(0.08)),
+          boxShadow: const [
+            BoxShadow(color: Color(0x1A0B1220), blurRadius: 12, offset: Offset(0, 8)),
+          ],
         ),
         child: Row(
           children: [
@@ -1039,14 +1061,14 @@ class _ZonesPageState extends State<ZonesPage> {
                 children: [
                   Row(
                     children: [
-                      Text(zone.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      Text(zone.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
                       const SizedBox(width: 6),
                       if (zone.alerts.isNotEmpty)
-                        Icon(Icons.notification_important, color: Colors.red[400], size: 14),
+                        Icon(Icons.notification_important, color: Colors.red[300], size: 14),
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Text("${zone.type} • Floor ${zone.floor}", style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                  Text("${zone.type} • Floor ${zone.floor}", style: const TextStyle(fontSize: 11, color: Colors.white70)),
                 ],
               ),
             ),
@@ -1072,9 +1094,9 @@ class _ZonesPageState extends State<ZonesPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white)),
         const SizedBox(height: 2),
-        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.white60)),
       ],
     );
   }
@@ -1094,10 +1116,11 @@ class _ZonesPageState extends State<ZonesPage> {
             (c) => Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(6),
+                color: Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white24),
               ),
-              child: Text(c, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
+              child: Text(c, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
             ),
           )
           .toList(),
@@ -1122,12 +1145,18 @@ class _ZonesPageState extends State<ZonesPage> {
         ),
       ),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
+        margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey[200]!),
+          gradient: const LinearGradient(
+            colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(color: Color(0x1A0F172A), blurRadius: 18, offset: Offset(0, 12)),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1142,33 +1171,47 @@ class _ZonesPageState extends State<ZonesPage> {
                     Text(
                       zone.name,
                       style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
                       ),
                     ),
                     Text(
                       "${zone.type} • Floor ${zone.floor}",
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: const TextStyle(fontSize: 12, color: Colors.white70),
                     ),
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: zone.occupancy == "occupied"
-                        ? const Color(0xFFE8F5E9)
-                        : const Color(0xFFF5F5F5),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    zone.occupancy == "occupied" ? "Occupied" : "Empty",
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+                        ? const Color(0xFF22C55E).withOpacity(0.18)
+                        : Colors.white.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
                       color: zone.occupancy == "occupied"
-                          ? const Color(0xFF2E7D32)
-                          : Colors.grey[600],
+                          ? const Color(0xFF22C55E)
+                          : Colors.white24,
                     ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        zone.occupancy == "occupied" ? Icons.circle : Icons.circle_outlined,
+                        size: 10,
+                        color: zone.occupancy == "occupied" ? const Color(0xFF22C55E) : Colors.white70,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        zone.occupancy == "occupied" ? "Occupied" : "Empty",
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -1177,11 +1220,17 @@ class _ZonesPageState extends State<ZonesPage> {
 
             // Energy Metrics
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 _buildMetric("Power", "${(zone.currentPower / 1000).toStringAsFixed(1)} kW"),
+                const SizedBox(width: 10),
                 _buildMetric("Consumption", "${zone.monthlyConsumption.toStringAsFixed(0)} kWh"),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
                 _buildMetric("Cost", "LKR ${zone.monthlyCost.toStringAsFixed(0)}"),
+                const SizedBox(width: 10),
                 _buildMetric("Devices", "${zone.deviceCount}"),
               ],
             ),
@@ -1197,7 +1246,7 @@ class _ZonesPageState extends State<ZonesPage> {
                     children: [
                       Text(
                         "Budget: LKR ${zone.monthlyBudget!.toStringAsFixed(0)}",
-                        style: const TextStyle(fontSize: 12),
+                        style: const TextStyle(fontSize: 12, color: Colors.white70),
                       ),
                       Text(
                         "${budgetPercentage.toStringAsFixed(0)}%",
@@ -1215,7 +1264,7 @@ class _ZonesPageState extends State<ZonesPage> {
                     child: LinearProgressIndicator(
                       value: budgetPercentage / 100,
                       minHeight: 6,
-                      backgroundColor: Colors.grey[200],
+                      backgroundColor: Colors.white12,
                       valueColor: AlwaysStoppedAnimation(budgetColor),
                     ),
                   ),
@@ -1231,17 +1280,30 @@ class _ZonesPageState extends State<ZonesPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(10),
           ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: const TextStyle(fontSize: 10, color: Colors.white70),
+              ),
+            ],
+          ),
         ),
       ],
     );
