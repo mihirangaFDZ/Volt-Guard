@@ -29,10 +29,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   String? _selectedModule;
   List<String> _availableLocations = [];
   List<String> _availableModules = [];
-  bool _filtersLoading = false;
   
   // Occupancy stats
   Map<String, dynamic>? _occupancyStats;
+
 
   @override
   void initState() {
@@ -43,21 +43,14 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   Future<void> _loadFilters() async {
     try {
-      setState(() {
-        _filtersLoading = true;
-      });
       final filters = await _analyticsService.fetchAvailableFilters();
       if (!mounted) return;
       setState(() {
         _availableLocations = filters['locations'] ?? [];
         _availableModules = filters['modules'] ?? [];
-        _filtersLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _filtersLoading = false;
-      });
       // Don't show error for filters, just continue without them
     }
   }
@@ -96,7 +89,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         _readings = data;
         _occupancyStats = occupancyStats;
         if (stats != null) {
-          final recs = _buildRecList(stats!);
+          final recs = _buildRecList(stats);
           _activeRecItems = recs.take(_maxActiveRecs).map((r) => _RecItem(rec: r)).toList();
           _backlogRecs = recs.skip(_maxActiveRecs).toList();
           _history = [];
@@ -119,6 +112,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -126,7 +120,11 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         title: const Text('Analytics & Recommendations'),
       ),
       body: RefreshIndicator(
-        onRefresh: _loadReadings,
+        onRefresh: () async {
+          await Future.wait([
+            _loadReadings(),
+          ]);
+        },
         child: _buildBody(),
       ),
     );
@@ -391,6 +389,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       ),
     );
   }
+
 
   Widget _buildOccupancyStats() {
     if (_occupancyStats == null) {
@@ -970,10 +969,10 @@ class _Recommendation {
 }
 
 class _RecItem {
-  _RecItem({required this.rec, this.completed = false});
+  _RecItem({required this.rec});
 
   final _Recommendation rec;
-  bool completed;
+  bool completed = false;
 }
 
 class _CompletedEntry {

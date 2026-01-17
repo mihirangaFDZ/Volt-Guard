@@ -3,6 +3,7 @@ import 'package:fl_chart/fl_chart.dart';
 
 import '../services/device_service.dart';
 import '../services/fault_detection_service.dart';
+import '../services/ml_training_service.dart';
 import '../models/energy_reading.dart';
 
 /// Devices page showing connected IoT devices with 24h insights and fault detection
@@ -18,6 +19,7 @@ enum TimeRange { hours6, hours24, days7 }
 class _DevicesPageState extends State<DevicesPage> {
   final DeviceService _deviceService = DeviceService();
   final FaultDetectionService _faultService = FaultDetectionService();
+  final MLTrainingService _mlTrainingService = MLTrainingService();
   List<Map<String, dynamic>> _devices = [];
   bool _loading = true;
   String? _error;
@@ -38,10 +40,19 @@ class _DevicesPageState extends State<DevicesPage> {
   bool _loadingSummary = false;
   final Map<String, DateTime?> _deviceLastReadings = {}; // Track last reading time per device
 
+  // ML training status
+  Map<String, dynamic>? _trainingStatus;
+  Map<String, dynamic>? _modelInfo;
+  bool _trainingStatusLoading = false;
+  bool _modelInfoLoading = false;
+  String? _trainingStatusError;
+  String? _modelInfoError;
+
   @override
   void initState() {
     super.initState();
     _loadDevices();
+    _loadMlOps();
   }
 
   Future<void> _loadDevices() async {
@@ -82,6 +93,97 @@ class _DevicesPageState extends State<DevicesPage> {
         _error = 'Failed to load devices: $e';
         _loading = false;
         _loadingSummary = false;
+      });
+    }
+  }
+
+  Future<void> _loadMlOps() async {
+    await Future.wait([
+      _loadTrainingStatus(),
+      _loadModelInfo(),
+    ]);
+  }
+
+  Future<void> _loadTrainingStatus() async {
+    try {
+      setState(() {
+        _trainingStatusLoading = true;
+        _trainingStatusError = null;
+      });
+      final status = await _mlTrainingService.fetchStatus();
+      if (!mounted) return;
+      setState(() {
+        _trainingStatus = status;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _trainingStatusError = 'Unable to load training status: $e';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _trainingStatusLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadModelInfo() async {
+    try {
+      setState(() {
+        _modelInfoLoading = true;
+        _modelInfoError = null;
+      });
+      final info = await _mlTrainingService.fetchModelInfo();
+      if (!mounted) return;
+      setState(() {
+        _modelInfo = info;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _modelInfoError = 'Unable to load model info: $e';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _modelInfoLoading = false;
+      });
+    }
+  }
+
+  Future<void> _startTraining() async {
+    try {
+      setState(() {
+        _trainingStatusLoading = true;
+        _trainingStatusError = null;
+      });
+      final result = await _mlTrainingService.startTraining();
+      if (!mounted) return;
+      setState(() {
+        _trainingStatus = {
+          "status": "running",
+          "last_trained": DateTime.now().toUtc().toIso8601String(),
+          "message": result["message"] ?? "Training initiated",
+        };
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ML training started in background')),
+      );
+      await Future.delayed(const Duration(seconds: 1));
+      await _loadTrainingStatus();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _trainingStatusError = 'Failed to start training: $e';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Training failed to start: $e')),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _trainingStatusLoading = false;
       });
     }
   }
@@ -382,6 +484,314 @@ class _DevicesPageState extends State<DevicesPage> {
     );
   }
 
+  Widget _buildMlOpsCard() {
+    final String status = (_trainingStatus?['status'] ?? 'unknown').toString();
+    final String? message = _trainingStatus?['message']?.toString();
+    final String? lastTrained = _trainingStatus?['last_trained']?.toString();
+    final bool isRunning = status == 'running';
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.precision_manufacturing, color: _statusColor(status)),
+                const SizedBox(width: 8),
+                const Text(
+                  'ML Operations',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                _buildStatusChip(status),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (_trainingStatusLoading) const LinearProgressIndicator(minHeight: 3),
+            if (_trainingStatusError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _trainingStatusError!,
+                  style: TextStyle(fontSize: 12, color: Colors.red[700]),
+                ),
+              ),
+            if (message != null && message.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  message,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                ),
+              ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.schedule, size: 16, color: Colors.blueGrey),
+                const SizedBox(width: 6),
+                Text(
+                  'Last trained: ${_formatTimestamp(lastTrained)}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                ElevatedButton.icon(
+                  onPressed: isRunning || _trainingStatusLoading ? null : _startTraining,
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Start Training'),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _trainingStatusLoading ? null : _loadMlOps,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Refresh'),
+                ),
+                const Spacer(),
+                if ((_trainingStatus?['output'] != null) || (_trainingStatus?['error'] != null))
+                  TextButton(
+                    onPressed: _showTrainingLogs,
+                    child: const Text('View Logs'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildModelInfoSection(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModelInfoSection() {
+    if (_modelInfoLoading) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 6),
+        child: LinearProgressIndicator(minHeight: 3),
+      );
+    }
+    if (_modelInfoError != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          _modelInfoError!,
+          style: TextStyle(fontSize: 12, color: Colors.red[700]),
+        ),
+      );
+    }
+    if (_modelInfo == null) {
+      return Text(
+        'Model info not available yet.',
+        style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+      );
+    }
+
+    final Map<String, dynamic> rf =
+        (_modelInfo?['random_forest'] as Map?)?.cast<String, dynamic>() ?? {};
+    final Map<String, dynamic> iso =
+        (_modelInfo?['isolation_forest'] as Map?)?.cast<String, dynamic>() ?? {};
+    final Map<String, dynamic> lstm =
+        (_modelInfo?['lstm'] as Map?)?.cast<String, dynamic>() ?? {};
+
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        _buildModelTile(
+          title: 'Random Forest',
+          data: rf,
+          accent: Colors.blue,
+          lines: [
+            'Status: ${rf['status'] ?? 'unknown'}',
+            'Features: ${_countFeatures(rf['features'])}',
+            'MAE: ${_formatMetric(_nestedNum(rf, 'metrics', 'mae'))}',
+            'R²: ${_formatMetric(_nestedNum(rf, 'metrics', 'r2'))}',
+          ],
+        ),
+        _buildModelTile(
+          title: 'Isolation Forest',
+          data: iso,
+          accent: Colors.orange,
+          lines: [
+            'Status: ${iso['status'] ?? 'unknown'}',
+            'Features: ${_countFeatures(iso['features'])}',
+          ],
+        ),
+        _buildModelTile(
+          title: 'LSTM',
+          data: lstm,
+          accent: Colors.teal,
+          lines: [
+            'Status: ${lstm['status'] ?? 'unknown'}',
+            'Seq length: ${lstm['sequence_length'] ?? 'n/a'}',
+            'Horizon: ${lstm['prediction_horizon'] ?? 'n/a'}',
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildModelTile({
+    required String title,
+    required Map<String, dynamic> data,
+    required Color accent,
+    required List<String> lines,
+  }) {
+    return Container(
+      width: 210,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: accent.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: accent.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.memory, size: 16, color: accent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(fontWeight: FontWeight.bold, color: accent),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...lines.map((line) => Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text(
+                  line,
+                  style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+                ),
+              )),
+        ],
+      ),
+    );
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'running':
+        return Colors.blue;
+      case 'completed':
+        return Colors.green;
+      case 'failed':
+        return Colors.red;
+      case 'idle':
+        return Colors.grey;
+      default:
+        return Colors.blueGrey;
+    }
+  }
+
+  Widget _buildStatusChip(String status) {
+    final Color color = _statusColor(status);
+    final String label = status.isEmpty ? 'unknown' : status;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.circle, size: 8, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label.toUpperCase(),
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTimestamp(String? iso) {
+    if (iso == null || iso.isEmpty) return 'n/a';
+    final parsed = DateTime.tryParse(iso);
+    if (parsed == null) return iso;
+    final local = parsed.toLocal();
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$month/$day $hour:$minute';
+  }
+
+  int _countFeatures(dynamic value) {
+    if (value is List) return value.length;
+    return 0;
+  }
+
+  double? _nestedNum(Map<String, dynamic> source, String key1, String key2) {
+    final Map<String, dynamic>? nested = (source[key1] as Map?)?.cast<String, dynamic>();
+    final value = nested?[key2];
+    if (value is num) return value.toDouble();
+    return null;
+  }
+
+  String _formatMetric(double? value) {
+    if (value == null) return 'n/a';
+    return value.toStringAsFixed(3);
+  }
+
+  void _showTrainingLogs() {
+    final String output = _trainingStatus?['output']?.toString() ?? '';
+    final String error = _trainingStatus?['error']?.toString() ?? '';
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.7,
+          minChildSize: 0.5,
+          maxChildSize: 0.9,
+          builder: (context, scrollController) {
+            return Padding(
+              padding: const EdgeInsets.all(16),
+              child: ListView(
+                controller: scrollController,
+                children: [
+                  const Text(
+                    'Training Logs',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  if (error.isNotEmpty) ...[
+                    Text('Error', style: TextStyle(color: Colors.red[700], fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 6),
+                    Text(error, style: const TextStyle(fontSize: 12)),
+                    const SizedBox(height: 12),
+                  ],
+                  if (output.isNotEmpty) ...[
+                    const Text('Output', style: TextStyle(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 6),
+                    SelectableText(output, style: const TextStyle(fontSize: 12)),
+                  ],
+                  if (output.isEmpty && error.isEmpty)
+                    const Text('No logs available yet.', style: TextStyle(fontSize: 12)),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   IconData _getDeviceIcon(String deviceType) {
     switch (deviceType.toLowerCase()) {
       case 'ac':
@@ -416,7 +826,12 @@ class _DevicesPageState extends State<DevicesPage> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadDevices,
+        onRefresh: () async {
+          await Future.wait([
+            _loadDevices(),
+            _loadMlOps(),
+          ]);
+        },
         child: _buildBody(),
       ),
     );
@@ -470,6 +885,8 @@ class _DevicesPageState extends State<DevicesPage> {
       children: [
         // Summary Statistics Card
         _buildSummaryCard(),
+        const SizedBox(height: 16),
+        _buildMlOpsCard(),
         const SizedBox(height: 16),
         ..._devices.map((device) => _buildDeviceCard(device)),
       ],
