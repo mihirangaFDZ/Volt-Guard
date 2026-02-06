@@ -13,12 +13,18 @@ from pathlib import Path
 backend_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(backend_dir))
 
-from app.services.create_clean_dataset import create_clean_dataset
 from app.services.ml_service import EnergyMLService
 from app.services.lstm_service import LSTMPredictor
 import pandas as pd
 
-def main():
+def _load_dataset_from_csv(input_csv: str):
+    df = pd.read_csv(input_csv)
+    # Preserve feature columns from the file
+    feature_cols = list(df.columns)
+    return df, feature_cols
+
+
+def main(input_csv: str | None = None):
     print("=" * 60)
     print("AI-Based Energy Analytics Training Pipeline")
     print("=" * 60)
@@ -26,7 +32,11 @@ def main():
     # Step 1: Create clean dataset
     print("\n[1/3] Creating clean dataset...")
     try:
-        df, feature_cols = create_clean_dataset(hours_back=48, output_path='clean_dataset.csv')
+        if input_csv:
+            df, feature_cols = _load_dataset_from_csv(input_csv)
+        else:
+            from app.services.create_clean_dataset import create_clean_dataset
+            df, feature_cols = create_clean_dataset(hours_back=48, output_path='clean_dataset.csv')
         
         if df is None or len(df) == 0:
             print("Error: No data available for training. Please ensure you have data in MongoDB.")
@@ -170,5 +180,18 @@ def main():
     print("3. Integrate predictions and anomaly detection into your routes")
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Train ML models from clean dataset or MongoDB"
+    )
+    parser.add_argument(
+        "--input-csv",
+        type=str,
+        default=None,
+        help="Path to an existing clean dataset CSV",
+    )
+
+    args = parser.parse_args()
+    main(input_csv=args.input_csv)
 
