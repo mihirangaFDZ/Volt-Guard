@@ -18,6 +18,7 @@ class ApiConfig {
   static const String energyEndpoint = '/energy';
   static const String devicesEndpoint = '/devices';
   static const String predictionsEndpoint = '/predictions';
+  static const String predictionEndpoint = '/prediction';
   static const String anomaliesEndpoint = '/anomalies';
   static const String userEndpoint = '/users';
   static const String analyticsEndpoint = '/analytics';
@@ -25,6 +26,7 @@ class ApiConfig {
   static const String signupEndpoint = '/users/signup';
   static const String faultsEndpoint = '/faults';
   static const String mlTrainingEndpoint = '/ml-training';
+  static const String behavioralProfilesEndpoint = '/behavioral-profiles';
 
   
   // Request timeout duration

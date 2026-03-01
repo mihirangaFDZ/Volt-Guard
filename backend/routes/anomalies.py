@@ -53,9 +53,118 @@ def add_anomaly(anomaly: Anomaly):
     return {"message": "Anomaly recorded"}
 
 @router.get("/active")
-def get_active_anomalies():
-    """Get active anomalies from database"""
-    return list(anomaly_col.find({"severity": "High"}, {"_id": 0}).sort("detected_at", -1).limit(100))
+def get_active_anomalies(
+    severity: Optional[str] = Query(None, description="Filter by severity: High, Medium, Low"),
+    limit: int = Query(50, ge=1, le=200),
+    hours_back: int = Query(168, ge=1, le=720, description="How many hours back to look"),
+):
+    """Get recent anomaly alerts (auto-detected and manual)."""
+    cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+    query = {"detected_at": {"$gte": cutoff.isoformat()}}
+    if severity:
+        query["severity"] = severity
+
+    results = list(
+        anomaly_col
+        .find(query, {"_id": 0})
+        .sort("detected_at", -1)
+        .limit(limit)
+    )
+    return results
+
+@router.get("/recent-alerts")
+def get_recent_alerts(
+    limit: int = Query(20, ge=1, le=100),
+    hours_back: int = Query(24, ge=1, le=168, description="Hours back to look"),
+):
+    """
+    Get recent anomaly alerts formatted for the mobile app alerts page.
+    Returns user-friendly alert objects sorted by time.
+    """
+    cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+    query = {"detected_at": {"$gte": cutoff.isoformat()}}
+
+    raw = list(
+        anomaly_col
+        .find(query, {"_id": 0})
+        .sort("detected_at", -1)
+        .limit(limit)
+    )
+
+    alerts = []
+    for doc in raw:
+        severity = doc.get("severity", "Medium")
+        if severity == "High":
+            icon = "warning"
+            color = "red"
+        elif severity == "Medium":
+            icon = "info"
+            color = "orange"
+        else:
+            icon = "info_outline"
+            color = "blue"
+
+        # Parse detected_at for relative time
+        detected_at = doc.get("detected_at", "")
+        try:
+            dt = datetime.fromisoformat(detected_at) if isinstance(detected_at, str) else detected_at
+            time_ago = _format_time_ago(dt)
+        except Exception:
+            time_ago = detected_at
+
+        alerts.append({
+            "id": doc.get("device_id", ""),
+            "title": _alert_title(doc),
+            "subtitle": doc.get("description", "Anomaly detected"),
+            "severity": severity,
+            "icon": icon,
+            "color": color,
+            "device_name": doc.get("device_name", doc.get("device_id", "Unknown")),
+            "location": doc.get("location", ""),
+            "power_w": doc.get("power_w", 0),
+            "avg_power_w": doc.get("avg_power_w", 0),
+            "detection_method": doc.get("detection_method", ""),
+            "detected_at": detected_at,
+            "time_ago": time_ago,
+            "status": doc.get("status", "active"),
+        })
+
+    return {
+        "total": len(alerts),
+        "hours_back": hours_back,
+        "alerts": alerts,
+    }
+
+
+def _alert_title(doc: dict) -> str:
+    """Generate a user-friendly alert title."""
+    severity = doc.get("severity", "Medium")
+    device_name = doc.get("device_name", doc.get("device_id", "Device"))
+    power = doc.get("power_w", 0)
+    avg = doc.get("avg_power_w", 0)
+
+    if severity == "High" and power > 0:
+        return f"High energy spike on {device_name}"
+    elif power > avg * 1.5 and avg > 0:
+        return f"Unusual usage on {device_name}"
+    else:
+        return f"Anomaly detected on {device_name}"
+
+
+def _format_time_ago(dt: datetime) -> str:
+    """Format datetime as relative time string."""
+    now = datetime.utcnow()
+    diff = now - dt
+    seconds = int(diff.total_seconds())
+    if seconds < 60:
+        return f"{seconds}s ago"
+    elif seconds < 3600:
+        return f"{seconds // 60}m ago"
+    elif seconds < 86400:
+        return f"{seconds // 3600}h ago"
+    else:
+        return f"{seconds // 86400}d ago"
+
 
 @router.get("/detect")
 def detect_anomalies(
