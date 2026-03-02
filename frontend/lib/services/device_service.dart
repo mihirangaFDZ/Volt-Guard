@@ -15,7 +15,8 @@ class DeviceService {
   Future<List<Map<String, dynamic>>> fetchDevices() async {
     final headers = await _authService.getAuthHeaders();
     headers['Accept'] = 'application/json';
-    final uri = Uri.parse('${ApiConfig.baseUrl}${ApiConfig.devicesEndpoint}');
+    // Add trailing slash to avoid 307 redirect on Azure
+    final uri = Uri.parse('${ApiConfig.baseUrl}${ApiConfig.devicesEndpoint}/');
     final resp = await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
     _ensureOk(resp);
     final List<dynamic> data = jsonDecode(resp.body) as List<dynamic>;
