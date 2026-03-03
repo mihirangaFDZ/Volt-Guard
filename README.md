@@ -1,5 +1,5 @@
 # Volt Guard
-## Smart Energy Management System Using IoT and AI-Based Data Analytics
+*Smart Energy Management System Using IoT and AI-Based Data Analytics*
 
 Volt Guard is an advanced AI-powered energy management system that analyzes energy consumption data from IoT devices, predicts future energy usage using machine learning models, detects abnormal consumption patterns, and identifies potential faults in appliances in real-time.
 
@@ -20,7 +20,13 @@ Volt Guard is an advanced AI-powered energy management system that analyzes ener
 11. [API Documentation](#api-documentation)
 12. [Security](#security)
 13. [Testing](#testing)
-14. [Deployment](#deployment)
+14. [ML Models Overview](#ml-models-overview)
+15. [Data Pipeline](#data-pipeline)
+16. [Deployment](#deployment)
+17. [License](#license)
+18. [Team](#team)
+19. [Support](#support)
+20. [Additional Resources](#additional-resources)
 
 ---
 
