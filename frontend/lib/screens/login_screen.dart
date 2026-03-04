@@ -180,12 +180,12 @@ class _LoginScreenState extends State<LoginScreen>
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                   borderSide:
-                                      BorderSide(color: Colors.grey[300]!),
+                                      BorderSide(color: Theme.of(context).colorScheme.outlineVariant!),
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                   borderSide:
-                                      BorderSide(color: Colors.grey[300]!),
+                                      BorderSide(color: Theme.of(context).colorScheme.outlineVariant!),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
@@ -233,12 +233,12 @@ class _LoginScreenState extends State<LoginScreen>
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                   borderSide:
-                                      BorderSide(color: Colors.grey[300]!),
+                                      BorderSide(color: Theme.of(context).colorScheme.outlineVariant!),
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                   borderSide:
-                                      BorderSide(color: Colors.grey[300]!),
+                                      BorderSide(color: Theme.of(context).colorScheme.outlineVariant!),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
