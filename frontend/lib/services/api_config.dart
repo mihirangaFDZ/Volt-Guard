@@ -7,7 +7,7 @@ class ApiConfig {
   // Base URL for the API
   // Change this to your backend server URL
   static const String baseUrl = 'http://10.0.2.2:8000';
-
+  
   // API version prefix
   static const String apiVersion = '/api/v1';
 
