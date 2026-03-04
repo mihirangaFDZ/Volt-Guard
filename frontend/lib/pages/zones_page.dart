@@ -46,28 +46,40 @@ class _ZonesPageState extends State<ZonesPage> {
     }
   }
 
-  double get totalPowerUsage => zones.fold(0, (sum, zone) => sum + zone.currentPower);
-  double get totalMonthlyCost => zones.fold(0, (sum, zone) => sum + zone.monthlyCost);
-  double get totalMonthlyBudget => zones.fold(0, (sum, zone) => sum + (zone.monthlyBudget ?? 0));
+  double get totalPowerUsage =>
+      zones.fold(0, (sum, zone) => sum + zone.currentPower);
+  double get totalMonthlyCost =>
+      zones.fold(0, (sum, zone) => sum + zone.monthlyCost);
+  double get totalMonthlyBudget =>
+      zones.fold(0, (sum, zone) => sum + (zone.monthlyBudget ?? 0));
   int get occupiedZones => zones.where((z) => z.occupancy == "occupied").length;
-  List<ZoneData> get _bestZones => [...zones]..sort((a, b) => b.efficiencyScore.compareTo(a.efficiencyScore));
-  List<ZoneData> get _attentionZones => [...zones]..sort((a, b) => a.efficiencyScore.compareTo(b.efficiencyScore));
-  List<ZoneData> get _wasteLeaders => [...zones]
-    ..sort((a, b) => b.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh).compareTo(
-          a.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh),
-        ));
+  List<ZoneData> get _bestZones => [...zones]
+    ..sort((a, b) => b.efficiencyScore.compareTo(a.efficiencyScore));
+  List<ZoneData> get _attentionZones => [...zones]
+    ..sort((a, b) => a.efficiencyScore.compareTo(b.efficiencyScore));
+  List<ZoneData> get _wasteLeaders => [...zones]..sort((a, b) =>
+      b.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh).compareTo(
+            a.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh),
+          ));
   double get totalAvoidedKwh => zones.fold(0, (sum, z) => sum + z.avoidedKwh);
   double get totalAvoidedCost => zones.fold(0, (sum, z) => sum + z.avoidedCost);
-  double get totalCarbonSaved => zones.fold(0, (sum, z) => sum + z.carbonSavedKg);
+  double get totalCarbonSaved =>
+      zones.fold(0, (sum, z) => sum + z.carbonSavedKg);
 
   List<ZoneData> get _filteredZones {
     final query = _search.toLowerCase();
     final list = zones.where((z) {
-      final matchesSearch = query.isEmpty || z.name.toLowerCase().contains(query) || z.type.toLowerCase().contains(query);
+      final matchesSearch = query.isEmpty ||
+          z.name.toLowerCase().contains(query) ||
+          z.type.toLowerCase().contains(query);
       final matchesAlerts = !_onlyAlerts || z.alerts.isNotEmpty;
       final matchesOccupied = !_onlyOccupied || z.occupancy == "occupied";
-      final matchesCompliance = !_onlyNonCompliant || z.recommendationCompliance < 0.8;
-      return matchesSearch && matchesAlerts && matchesOccupied && matchesCompliance;
+      final matchesCompliance =
+          !_onlyNonCompliant || z.recommendationCompliance < 0.8;
+      return matchesSearch &&
+          matchesAlerts &&
+          matchesOccupied &&
+          matchesCompliance;
     }).toList();
 
     list.sort((a, b) {
@@ -75,8 +87,10 @@ class _ZonesPageState extends State<ZonesPage> {
         case "efficiency":
           return b.efficiencyScore.compareTo(a.efficiencyScore);
         case "waste":
-          final wa = a.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh);
-          final wb = b.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh);
+          final wa =
+              a.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh);
+          final wb =
+              b.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh);
           return wb.compareTo(wa);
         case "peak":
           return b.peakDemandKw.compareTo(a.peakDemandKw);
@@ -90,15 +104,13 @@ class _ZonesPageState extends State<ZonesPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9F9),
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text("Zone Manager", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Zone Manager',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
           IconButton(
             icon: const Icon(Icons.add_circle_outline),
-            color: const Color(0xFF4A90E2),
+            color: Theme.of(context).colorScheme.primary,
             onPressed: () => _showAddZoneDialog(),
           ),
         ],
@@ -139,9 +151,11 @@ class _ZonesPageState extends State<ZonesPage> {
         children: const [
           Icon(Icons.meeting_room, size: 48, color: Colors.grey),
           SizedBox(height: 12),
-          Text("No zones found", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          Text("No zones found",
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           SizedBox(height: 6),
-          Text("Pull to refresh or add a zone", style: TextStyle(color: Colors.grey)),
+          Text("Pull to refresh or add a zone",
+              style: TextStyle(color: Colors.grey)),
         ],
       ),
     );
@@ -159,7 +173,8 @@ class _ZonesPageState extends State<ZonesPage> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withOpacity(0.06)),
         boxShadow: const [
-          BoxShadow(color: Color(0x330B1220), blurRadius: 18, offset: Offset(0, 10)),
+          BoxShadow(
+              color: Color(0x330B1220), blurRadius: 18, offset: Offset(0, 10)),
         ],
       ),
       child: Column(
@@ -170,7 +185,10 @@ class _ZonesPageState extends State<ZonesPage> {
             children: const [
               Text(
                 "Energy Overview",
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Colors.white),
+                style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white),
               ),
               Icon(Icons.grid_view_rounded, color: Colors.white70, size: 18),
             ],
@@ -213,7 +231,8 @@ class _ZonesPageState extends State<ZonesPage> {
                 child: _buildStatCard(
                   icon: Icons.devices,
                   title: "Total Devices",
-                  value: "${zones.fold<int>(0, (sum, z) => sum + z.deviceCount)}",
+                  value:
+                      "${zones.fold<int>(0, (sum, z) => sum + z.deviceCount)}",
                   color: const Color(0xFFE879F9),
                 ),
               ),
@@ -237,7 +256,8 @@ class _ZonesPageState extends State<ZonesPage> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withOpacity(0.28)),
         boxShadow: const [
-          BoxShadow(color: Color(0x1A000000), blurRadius: 14, offset: Offset(0, 10)),
+          BoxShadow(
+              color: Color(0x1A000000), blurRadius: 14, offset: Offset(0, 10)),
         ],
       ),
       child: Column(
@@ -259,7 +279,8 @@ class _ZonesPageState extends State<ZonesPage> {
           const SizedBox(height: 6),
           Text(
             value,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white),
+            style: const TextStyle(
+                fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white),
           ),
         ],
       ),
@@ -278,15 +299,18 @@ class _ZonesPageState extends State<ZonesPage> {
               margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFF2563EB),
+                color: Theme.of(context).colorScheme.primary,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(Icons.tune, color: Colors.white, size: 18),
             ),
             filled: true,
             fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+            contentPadding:
+                const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none),
           ),
           onChanged: (v) => setState(() => _search = v),
         ),
@@ -295,13 +319,17 @@ class _ZonesPageState extends State<ZonesPage> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _buildFilterChip("Has alerts", Icons.warning_amber_rounded, _onlyAlerts, (v) => setState(() => _onlyAlerts = v)),
-            _buildFilterChip("Occupied", Icons.event_available, _onlyOccupied, (v) => setState(() => _onlyOccupied = v)),
-            _buildFilterChip("Non-compliant", Icons.policy, _onlyNonCompliant, (v) => setState(() => _onlyNonCompliant = v)),
+            _buildFilterChip("Has alerts", Icons.warning_amber_rounded,
+                _onlyAlerts, (v) => setState(() => _onlyAlerts = v)),
+            _buildFilterChip("Occupied", Icons.event_available, _onlyOccupied,
+                (v) => setState(() => _onlyOccupied = v)),
+            _buildFilterChip("Non-compliant", Icons.policy, _onlyNonCompliant,
+                (v) => setState(() => _onlyNonCompliant = v)),
             DropdownButton<String>(
               value: _sort,
               items: const [
-                DropdownMenuItem(value: "efficiency", child: Text("Sort: Efficiency")),
+                DropdownMenuItem(
+                    value: "efficiency", child: Text("Sort: Efficiency")),
                 DropdownMenuItem(value: "waste", child: Text("Sort: Waste")),
                 DropdownMenuItem(value: "peak", child: Text("Sort: Peak")),
                 DropdownMenuItem(value: "name", child: Text("Sort: Name")),
@@ -315,7 +343,8 @@ class _ZonesPageState extends State<ZonesPage> {
     );
   }
 
-  Widget _buildFilterChip(String label, IconData icon, bool selected, ValueChanged<bool> onSelected) {
+  Widget _buildFilterChip(String label, IconData icon, bool selected,
+      ValueChanged<bool> onSelected) {
     return FilterChip(
       label: Row(
         mainAxisSize: MainAxisSize.min,
@@ -328,8 +357,8 @@ class _ZonesPageState extends State<ZonesPage> {
       selected: selected,
       onSelected: onSelected,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      selectedColor: const Color(0xFF2563EB).withOpacity(0.15),
-      checkmarkColor: const Color(0xFF2563EB),
+      selectedColor: Theme.of(context).colorScheme.primaryContainer,
+      checkmarkColor: Theme.of(context).colorScheme.primary,
     );
   }
 
@@ -352,20 +381,22 @@ class _ZonesPageState extends State<ZonesPage> {
   }
 
   Widget _buildPerformanceRanking() {
-    final ranked = [...zones]..sort((a, b) => b.efficiencyScore.compareTo(a.efficiencyScore));
-    
+    final ranked = [...zones]
+      ..sort((a, b) => b.efficiencyScore.compareTo(a.efficiencyScore));
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Efficiency Ranking", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const Text("Efficiency Ranking",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
           const SizedBox(height: 12),
           ...List.generate(
             ranked.length,
@@ -396,7 +427,8 @@ class _ZonesPageState extends State<ZonesPage> {
             child: Center(
               child: Text(
                 "#$rank",
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
               ),
             ),
           ),
@@ -405,16 +437,31 @@ class _ZonesPageState extends State<ZonesPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(zone.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                Text("${zone.type} • Floor ${zone.floor}", style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                Text(zone.name,
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text("${zone.type} • Floor ${zone.floor}",
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.6))),
               ],
             ),
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text("${zone.efficiencyScore.toStringAsFixed(0)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              Text("efficiency", style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+              Text("${zone.efficiencyScore.toStringAsFixed(0)}",
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 14)),
+              Text("efficiency",
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.6))),
             ],
           ),
           const SizedBox(width: 16),
@@ -422,7 +469,7 @@ class _ZonesPageState extends State<ZonesPage> {
             width: 60,
             height: 6,
             decoration: BoxDecoration(
-              color: Colors.grey[200],
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(3),
             ),
             child: Stack(
@@ -454,12 +501,13 @@ class _ZonesPageState extends State<ZonesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Performance Distribution", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const Text("Performance Distribution",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -471,12 +519,18 @@ class _ZonesPageState extends State<ZonesPage> {
               ),
               _buildDistributionMetric(
                 label: "Good (60-79)",
-                count: zones.where((z) => z.efficiencyScore >= 60 && z.efficiencyScore < 80).length,
+                count: zones
+                    .where((z) =>
+                        z.efficiencyScore >= 60 && z.efficiencyScore < 80)
+                    .length,
                 color: const Color(0xFFFBBF24),
               ),
               _buildDistributionMetric(
                 label: "Fair (40-59)",
-                count: zones.where((z) => z.efficiencyScore >= 40 && z.efficiencyScore < 60).length,
+                count: zones
+                    .where((z) =>
+                        z.efficiencyScore >= 40 && z.efficiencyScore < 60)
+                    .length,
                 color: const Color(0xFFF97316),
               ),
               _buildDistributionMetric(
@@ -501,21 +555,23 @@ class _ZonesPageState extends State<ZonesPage> {
         Container(
           width: 50,
           height: 50,
-          decoration: BoxDecoration(color: color.withOpacity(0.2), shape: BoxShape.circle),
+          decoration: BoxDecoration(
+              color: color.withOpacity(0.2), shape: BoxShape.circle),
           child: Center(
             child: Text(
               count.toString(),
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: color),
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 18, color: color),
             ),
           ),
         ),
         const SizedBox(height: 6),
-        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[700]), textAlign: TextAlign.center),
+        Text(label,
+            style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+            textAlign: TextAlign.center),
       ],
     );
   }
-
-
 
   Widget _buildPerformanceSection() {
     return Column(
@@ -551,7 +607,7 @@ class _ZonesPageState extends State<ZonesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -564,10 +620,12 @@ class _ZonesPageState extends State<ZonesPage> {
                   color: const Color(0xFFE3F2FD),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.history, color: Color(0xFF2196F3), size: 20),
+                child: const Icon(Icons.history,
+                    color: Color(0xFF2196F3), size: 20),
               ),
               const SizedBox(width: 10),
-              const Text("What Happened (Today's Summary)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const Text("What Happened (Today's Summary)",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             ],
           ),
           const SizedBox(height: 14),
@@ -607,16 +665,22 @@ class _ZonesPageState extends State<ZonesPage> {
           Container(
             width: 3,
             height: 60,
-            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+            decoration: BoxDecoration(
+                color: color, borderRadius: BorderRadius.circular(2)),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 12)),
+                Text(title,
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                        fontSize: 12)),
                 const SizedBox(height: 4),
-                Text(detail, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                Text(detail,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700])),
               ],
             ),
           ),
@@ -627,7 +691,8 @@ class _ZonesPageState extends State<ZonesPage> {
 
   Widget _buildWhyItHappened() {
     final topWaste = _wasteLeaders.first;
-    final nonCompliant = zones.where((z) => z.recommendationCompliance < 0.8).toList();
+    final nonCompliant =
+        zones.where((z) => z.recommendationCompliance < 0.8).toList();
 
     return Container(
       width: double.infinity,
@@ -635,7 +700,7 @@ class _ZonesPageState extends State<ZonesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -648,10 +713,12 @@ class _ZonesPageState extends State<ZonesPage> {
                   color: const Color(0xFFFFF8E1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.lightbulb, color: Color(0xFFF9A825), size: 20),
+                child: const Icon(Icons.lightbulb,
+                    color: Color(0xFFF9A825), size: 20),
               ),
               const SizedBox(width: 10),
-              const Text("Why It Happened (Root Causes)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const Text("Why It Happened (Root Causes)",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             ],
           ),
           const SizedBox(height: 14),
@@ -683,7 +750,8 @@ class _ZonesPageState extends State<ZonesPage> {
     );
   }
 
-  Widget _buildCauseItem(String title, String description, IconData icon, Color color) {
+  Widget _buildCauseItem(
+      String title, String description, IconData icon, Color color) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -700,9 +768,14 @@ class _ZonesPageState extends State<ZonesPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 12)),
+                Text(title,
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                        fontSize: 12)),
                 const SizedBox(height: 4),
-                Text(description, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                Text(description,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700])),
               ],
             ),
           ),
@@ -720,7 +793,7 @@ class _ZonesPageState extends State<ZonesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -733,15 +806,24 @@ class _ZonesPageState extends State<ZonesPage> {
                   color: const Color(0xFFFFEBEE),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.warning, color: Color(0xFFE53935), size: 20),
+                child: const Icon(Icons.warning,
+                    color: Color(0xFFE53935), size: 20),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("Energy Waste Breakdown", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    Text("Analyzing ${topWaste.name}", style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                    const Text("Energy Waste Breakdown",
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text("Analyzing ${topWaste.name}",
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withOpacity(0.6))),
                   ],
                 ),
               ),
@@ -749,16 +831,24 @@ class _ZonesPageState extends State<ZonesPage> {
           ),
           const SizedBox(height: 14),
           if (topWaste.wasteBreakdown.isEmpty)
-            Text("No waste data available", style: TextStyle(color: Colors.grey[600], fontSize: 12))
+            Text("No waste data available",
+                style: TextStyle(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.6),
+                    fontSize: 12))
           else
             Column(
               children: List.generate(
                 topWaste.wasteBreakdown.length,
                 (idx) {
                   final waste = topWaste.wasteBreakdown[idx];
-                  final totalWaste =
-                      topWaste.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh);
-                  final percentage = totalWaste > 0 ? (waste.wastedKwh / totalWaste * 100) : 0.0;
+                  final totalWaste = topWaste.wasteBreakdown
+                      .fold<double>(0, (s, w) => s + w.wastedKwh);
+                  final percentage = totalWaste > 0
+                      ? (waste.wastedKwh / totalWaste * 100)
+                      : 0.0;
 
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -772,13 +862,23 @@ class _ZonesPageState extends State<ZonesPage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(waste.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                  Text(waste.cause, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                                  Text(waste.name,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12)),
+                                  Text(waste.cause,
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurface
+                                              .withOpacity(0.6))),
                                 ],
                               ),
                             ),
                             Text("${waste.wastedKwh.toStringAsFixed(2)} kWh",
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 12)),
                           ],
                         ),
                         const SizedBox(height: 6),
@@ -790,16 +890,21 @@ class _ZonesPageState extends State<ZonesPage> {
                                 child: LinearProgressIndicator(
                                   value: percentage / 100,
                                   minHeight: 8,
-                                  backgroundColor: Colors.grey[200],
+                                  backgroundColor: Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest,
                                   valueColor: AlwaysStoppedAnimation(
-                                    Color.lerp(const Color(0xFF4CAF50), const Color(0xFFEF5350),
+                                    Color.lerp(
+                                        const Color(0xFF4CAF50),
+                                        const Color(0xFFEF5350),
                                         percentage / 100)!,
                                   ),
                                 ),
                               ),
                             ),
                             const SizedBox(width: 8),
-                            Text("${percentage.toStringAsFixed(0)}%", style: const TextStyle(fontSize: 11)),
+                            Text("${percentage.toStringAsFixed(0)}%",
+                                style: const TextStyle(fontSize: 11)),
                           ],
                         ),
                       ],
@@ -816,12 +921,18 @@ class _ZonesPageState extends State<ZonesPage> {
   Widget _buildDetailedRecommendations() {
     final topSaver = _bestZones.first;
     final topWaste = _wasteLeaders.first;
-    final peakRoom = [...zones]..sort((a, b) => b.peakDemandKw.compareTo(a.peakDemandKw));
+    final peakRoom = [...zones]
+      ..sort((a, b) => b.peakDemandKw.compareTo(a.peakDemandKw));
     final peak = peakRoom.first;
 
-    final wasteEquipment = topWaste.wasteBreakdown.isNotEmpty ? topWaste.wasteBreakdown.first.name : 'equipment';
-    final wasteCause = topWaste.wasteBreakdown.isNotEmpty ? topWaste.wasteBreakdown.first.cause : 'Configure auto-off timers';
-    final wasteImpact = topWaste.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh);
+    final wasteEquipment = topWaste.wasteBreakdown.isNotEmpty
+        ? topWaste.wasteBreakdown.first.name
+        : 'equipment';
+    final wasteCause = topWaste.wasteBreakdown.isNotEmpty
+        ? topWaste.wasteBreakdown.first.cause
+        : 'Configure auto-off timers';
+    final wasteImpact =
+        topWaste.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh);
 
     final recommendations = [
       {
@@ -844,7 +955,8 @@ class _ZonesPageState extends State<ZonesPage> {
         'priority': 'MEDIUM',
         'room': topSaver.name,
         'action': 'Copy best practices',
-        'detail': '${(topSaver.recommendationCompliance * 100).toStringAsFixed(0)}% compliance - replicate schedules to other rooms',
+        'detail':
+            '${(topSaver.recommendationCompliance * 100).toStringAsFixed(0)}% compliance - replicate schedules to other rooms',
         'impact': '${topSaver.avoidedKwh.toStringAsFixed(1)} kWh already saved',
         'color': const Color(0xFF4CAF50),
       },
@@ -856,7 +968,7 @@ class _ZonesPageState extends State<ZonesPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -869,10 +981,12 @@ class _ZonesPageState extends State<ZonesPage> {
                   color: const Color(0xFFE8F5E9),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.check_circle, color: Color(0xFF4CAF50), size: 20),
+                child: const Icon(Icons.check_circle,
+                    color: Color(0xFF4CAF50), size: 20),
               ),
               const SizedBox(width: 10),
-              const Text("Actionable Recommendations", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const Text("Actionable Recommendations",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             ],
           ),
           const SizedBox(height: 14),
@@ -929,14 +1043,21 @@ class _ZonesPageState extends State<ZonesPage> {
                 ),
                 child: Text(
                   priority,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: Colors.white),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 10,
+                      color: Colors.white),
                 ),
               ),
-              Text(room, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+              Text(room,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 11)),
             ],
           ),
           const SizedBox(height: 8),
-          Text(action, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          Text(action,
+              style:
+                  const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
           const SizedBox(height: 4),
           Text(detail, style: TextStyle(fontSize: 11, color: Colors.grey[700])),
           const SizedBox(height: 6),
@@ -946,16 +1067,14 @@ class _ZonesPageState extends State<ZonesPage> {
               color: color.withOpacity(0.2),
               borderRadius: BorderRadius.circular(4),
             ),
-            child: Text(impact, style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600)),
+            child: Text(impact,
+                style: TextStyle(
+                    fontSize: 11, color: color, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
     );
   }
-
-
-
-
 
   Widget _buildZonesListSection() {
     return Container(
@@ -969,7 +1088,8 @@ class _ZonesPageState extends State<ZonesPage> {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.white.withOpacity(0.06)),
         boxShadow: const [
-          BoxShadow(color: Color(0x330B1220), blurRadius: 16, offset: Offset(0, 10)),
+          BoxShadow(
+              color: Color(0x330B1220), blurRadius: 16, offset: Offset(0, 10)),
         ],
       ),
       child: Column(
@@ -980,10 +1100,14 @@ class _ZonesPageState extends State<ZonesPage> {
             children: [
               const Text(
                 "Zones",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white),
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(10),
@@ -991,7 +1115,10 @@ class _ZonesPageState extends State<ZonesPage> {
                 ),
                 child: Text(
                   "${_filteredZones.length} active",
-                  style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             ],
@@ -1003,7 +1130,8 @@ class _ZonesPageState extends State<ZonesPage> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: _filteredZones.length,
-            itemBuilder: (context, index) => _buildRoomRow(_filteredZones[index]),
+            itemBuilder: (context, index) =>
+                _buildRoomRow(_filteredZones[index]),
           ),
         ],
       ),
@@ -1020,18 +1148,45 @@ class _ZonesPageState extends State<ZonesPage> {
       ),
       child: Row(
         children: const [
-          Expanded(flex: 2, child: Text("Room", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white70))),
-          Expanded(child: Text("Eff.", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white70))),
-          Expanded(child: Text("Waste", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white70))),
-          Expanded(child: Text("Peak", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white70))),
-          Expanded(child: Text("Status", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white70))),
+          Expanded(
+              flex: 2,
+              child: Text("Room",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: Colors.white70))),
+          Expanded(
+              child: Text("Eff.",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: Colors.white70))),
+          Expanded(
+              child: Text("Waste",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: Colors.white70))),
+          Expanded(
+              child: Text("Peak",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: Colors.white70))),
+          Expanded(
+              child: Text("Status",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: Colors.white70))),
         ],
       ),
     );
   }
 
   Widget _buildRoomRow(ZoneData zone) {
-    final wasteKwh = zone.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh);
+    final wasteKwh =
+        zone.wasteBreakdown.fold<double>(0, (s, w) => s + w.wastedKwh);
     return GestureDetector(
       onTap: () => Navigator.push(
         context,
@@ -1049,7 +1204,8 @@ class _ZonesPageState extends State<ZonesPage> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.white.withOpacity(0.08)),
           boxShadow: const [
-            BoxShadow(color: Color(0x1A0B1220), blurRadius: 12, offset: Offset(0, 8)),
+            BoxShadow(
+                color: Color(0x1A0B1220), blurRadius: 12, offset: Offset(0, 8)),
           ],
         ),
         child: Row(
@@ -1061,25 +1217,34 @@ class _ZonesPageState extends State<ZonesPage> {
                 children: [
                   Row(
                     children: [
-                      Text(zone.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                      Text(zone.name,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
                       const SizedBox(width: 6),
                       if (zone.alerts.isNotEmpty)
-                        Icon(Icons.notification_important, color: Colors.red[300], size: 14),
+                        Icon(Icons.notification_important,
+                            color: Colors.red[300], size: 14),
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Text("${zone.type} • Floor ${zone.floor}", style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                  Text("${zone.type} • Floor ${zone.floor}",
+                      style:
+                          const TextStyle(fontSize: 11, color: Colors.white70)),
                 ],
               ),
             ),
             Expanded(
-              child: _buildMiniStat("${zone.efficiencyScore.toStringAsFixed(0)}", "eff."),
+              child: _buildMiniStat(
+                  "${zone.efficiencyScore.toStringAsFixed(0)}", "eff."),
             ),
             Expanded(
-              child: _buildMiniStat("${wasteKwh.toStringAsFixed(1)} kWh", "waste"),
+              child:
+                  _buildMiniStat("${wasteKwh.toStringAsFixed(1)} kWh", "waste"),
             ),
             Expanded(
-              child: _buildMiniStat("${zone.peakDemandKw.toStringAsFixed(1)} kW", "peak"),
+              child: _buildMiniStat(
+                  "${zone.peakDemandKw.toStringAsFixed(1)} kW", "peak"),
             ),
             Expanded(
               child: _buildStatusChips(zone),
@@ -1094,9 +1259,14 @@ class _ZonesPageState extends State<ZonesPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white)),
+        Text(value,
+            style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+                color: Colors.white)),
         const SizedBox(height: 2),
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.white60)),
+        Text(label,
+            style: const TextStyle(fontSize: 11, color: Colors.white60)),
       ],
     );
   }
@@ -1120,7 +1290,11 @@ class _ZonesPageState extends State<ZonesPage> {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.white24),
               ),
-              child: Text(c, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
+              child: Text(c,
+                  style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
             ),
           )
           .toList(),
@@ -1155,7 +1329,10 @@ class _ZonesPageState extends State<ZonesPage> {
           ),
           borderRadius: BorderRadius.circular(16),
           boxShadow: const [
-            BoxShadow(color: Color(0x1A0F172A), blurRadius: 18, offset: Offset(0, 12)),
+            BoxShadow(
+                color: Color(0x1A0F172A),
+                blurRadius: 18,
+                offset: Offset(0, 12)),
           ],
         ),
         child: Column(
@@ -1178,12 +1355,14 @@ class _ZonesPageState extends State<ZonesPage> {
                     ),
                     Text(
                       "${zone.type} • Floor ${zone.floor}",
-                      style: const TextStyle(fontSize: 12, color: Colors.white70),
+                      style:
+                          const TextStyle(fontSize: 12, color: Colors.white70),
                     ),
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: zone.occupancy == "occupied"
                         ? const Color(0xFF22C55E).withOpacity(0.18)
@@ -1198,9 +1377,13 @@ class _ZonesPageState extends State<ZonesPage> {
                   child: Row(
                     children: [
                       Icon(
-                        zone.occupancy == "occupied" ? Icons.circle : Icons.circle_outlined,
+                        zone.occupancy == "occupied"
+                            ? Icons.circle
+                            : Icons.circle_outlined,
                         size: 10,
-                        color: zone.occupancy == "occupied" ? const Color(0xFF22C55E) : Colors.white70,
+                        color: zone.occupancy == "occupied"
+                            ? const Color(0xFF22C55E)
+                            : Colors.white70,
                       ),
                       const SizedBox(width: 6),
                       Text(
@@ -1221,15 +1404,18 @@ class _ZonesPageState extends State<ZonesPage> {
             // Energy Metrics
             Row(
               children: [
-                _buildMetric("Power", "${(zone.currentPower / 1000).toStringAsFixed(1)} kW"),
+                _buildMetric("Power",
+                    "${(zone.currentPower / 1000).toStringAsFixed(1)} kW"),
                 const SizedBox(width: 10),
-                _buildMetric("Consumption", "${zone.monthlyConsumption.toStringAsFixed(0)} kWh"),
+                _buildMetric("Consumption",
+                    "${zone.monthlyConsumption.toStringAsFixed(0)} kWh"),
               ],
             ),
             const SizedBox(height: 8),
             Row(
               children: [
-                _buildMetric("Cost", "LKR ${zone.monthlyCost.toStringAsFixed(0)}"),
+                _buildMetric(
+                    "Cost", "LKR ${zone.monthlyCost.toStringAsFixed(0)}"),
                 const SizedBox(width: 10),
                 _buildMetric("Devices", "${zone.deviceCount}"),
               ],
@@ -1246,7 +1432,8 @@ class _ZonesPageState extends State<ZonesPage> {
                     children: [
                       Text(
                         "Budget: LKR ${zone.monthlyBudget!.toStringAsFixed(0)}",
-                        style: const TextStyle(fontSize: 12, color: Colors.white70),
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.white70),
                       ),
                       Text(
                         "${budgetPercentage.toStringAsFixed(0)}%",
@@ -1416,7 +1603,8 @@ class ZoneData {
   factory ZoneData.fromApi(Map<String, dynamic> json) {
     final loc = json['location']?.toString() ?? 'Unknown Zone';
     final occupancyBool = json['occupancy'] == true;
-    final currentPower = (json['power_w'] is num) ? (json['power_w'] as num).toDouble() : 0.0;
+    final currentPower =
+        (json['power_w'] is num) ? (json['power_w'] as num).toDouble() : 0.0;
     final currentKw = currentPower / 1000.0;
 
     return ZoneData(

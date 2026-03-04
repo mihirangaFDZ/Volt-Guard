@@ -1,8 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:volt_guard/providers/theme_provider.dart';
 import 'package:volt_guard/screens/login_screen.dart';
+import 'package:volt_guard/theme/app_theme.dart';
 
 void main() {
-  runApp(const VoltGuardApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+      ],
+      child: const VoltGuardApp(),
+    ),
+  );
 }
 
 class VoltGuardApp extends StatelessWidget {
@@ -10,17 +20,13 @@ class VoltGuardApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeMode = context.watch<ThemeProvider>().themeMode;
     return MaterialApp(
       title: 'Volt Guard',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4A90E2),
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-        fontFamily: 'Roboto',
-      ),
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: themeMode,
       home: const LoginScreen(),
     );
   }
