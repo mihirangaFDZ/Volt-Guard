@@ -5,6 +5,8 @@ import '../services/device_service.dart';
 import '../services/fault_detection_service.dart';
 import '../services/behavioral_profile_service.dart';
 import '../services/prediction_service.dart';
+import '../services/anomaly_alert_service.dart';
+import '../services/ml_training_manager.dart';
 import '../models/energy_reading.dart';
 
 /// Devices page showing connected IoT devices with 24h insights and fault detection
@@ -32,8 +34,6 @@ class _DevicesPageState extends State<DevicesPage> {
   final Map<String, TimeRange> _timeRanges = {};
   final Map<String, List<dynamic>> _deviceFaults = {};
   final Map<String, bool> _loadingFaults = {};
-  Map<String, Map<String, dynamic>> _deviceHealth = {}; // Store device health data
-  
   // Summary statistics
   int _totalDevices = 0;
   int _activeDevices = 0;
@@ -60,6 +60,12 @@ class _DevicesPageState extends State<DevicesPage> {
   Map<String, dynamic>? _deviceComparison;
   bool _comparisonLoading = false;
   String? _comparisonError;
+
+  // Anomaly detection state
+  final AnomalyAlertService _anomalyService = AnomalyAlertService();
+  Map<String, Map<String, dynamic>> _deviceAnomalies = {};
+  bool _anomalyLoading = false;
+  String? _anomalyError;
 
   @override
   void initState() {
@@ -89,10 +95,10 @@ class _DevicesPageState extends State<DevicesPage> {
         }
       });
 
-      // Load summary statistics and device health
+      // Load summary statistics and anomaly detection
       await Future.wait([
         _loadSummaryStatistics(),
-        _loadDeviceHealth(),
+        _loadAnomalyDetection(),
       ]);
 
       if (!mounted) return;
@@ -227,24 +233,58 @@ class _DevicesPageState extends State<DevicesPage> {
     }
   }
 
-  Future<void> _loadDeviceHealth() async {
+  Future<void> _loadAnomalyDetection() async {
+    setState(() {
+      _anomalyLoading = true;
+      _anomalyError = null;
+    });
     try {
-      final deviceHealth = await _faultService.fetchDeviceHealth(limit: 100);
+      // Check if model is ready first
+      final manager = MLTrainingManager.instance;
+      await manager.refreshStatus();
+
+      if (manager.isTraining) {
+        setState(() {
+          _anomalyLoading = false;
+          _anomalyError = 'model_training';
+        });
+        return;
+      }
+
+      final result = await _anomalyService.detectAnomalies(
+        hoursBack: 24,
+        minScore: 0.3,
+        method: 'isolation_forest',
+      );
       if (!mounted) return;
-      
-      final healthMap = <String, Map<String, dynamic>>{};
-      for (final health in deviceHealth) {
-        final deviceId = health['device_id'] as String?;
-        if (deviceId != null) {
-          healthMap[deviceId] = health as Map<String, dynamic>;
+
+      final anomalies = result['anomalies'] as List<dynamic>? ?? [];
+
+      // Group anomalies by device_id, keeping the highest score per device
+      final anomalyMap = <String, Map<String, dynamic>>{};
+      for (final a in anomalies) {
+        final deviceId = a['device_id'] as String? ??
+            a['location'] as String? ?? '';
+        if (deviceId.isEmpty) continue;
+
+        final score = (a['anomaly_score'] as num?)?.toDouble() ?? 0.0;
+        final existing = anomalyMap[deviceId];
+        if (existing == null ||
+            score > ((existing['anomaly_score'] as num?)?.toDouble() ?? 0.0)) {
+          anomalyMap[deviceId] = Map<String, dynamic>.from(a as Map);
         }
       }
-      
+
       setState(() {
-        _deviceHealth = healthMap;
+        _deviceAnomalies = anomalyMap;
+        _anomalyLoading = false;
       });
     } catch (e) {
-      // Silently fail - health is not critical
+      if (!mounted) return;
+      setState(() {
+        _anomalyError = e.toString();
+        _anomalyLoading = false;
+      });
     }
   }
 
@@ -272,8 +312,8 @@ class _DevicesPageState extends State<DevicesPage> {
             final timeDiff = now.difference(lastReading.receivedAt);
             _deviceLastReadings[deviceId] = lastReading.receivedAt;
             
-            // Active if last reading is less than 5 seconds ago
-            if (timeDiff.inSeconds < 5) {
+            // Active if last reading is within the last hour (matches fetch window)
+            if (timeDiff.inMinutes < 60) {
               activeCount++;
             }
           }
@@ -419,7 +459,7 @@ class _DevicesPageState extends State<DevicesPage> {
     for (final device in _devices) {
       final deviceId = device['device_id'] as String? ?? '';
       final lastReading = _deviceLastReadings[deviceId];
-      if (lastReading != null && now.difference(lastReading).inSeconds < 5) {
+      if (lastReading != null && now.difference(lastReading).inMinutes < 60) {
         activeCount++;
       }
     }
@@ -767,8 +807,21 @@ class _DevicesPageState extends State<DevicesPage> {
             (d['module_id'] as String).isNotEmpty)
         .toList();
 
+    // Deduplicate by device_id to prevent DropdownButton assertion errors
+    final seen = <String>{};
+    final uniqueDevices = devicesWithModule.where((d) {
+      final id = d['device_id'] as String? ?? '';
+      return id.isNotEmpty && seen.add(id);
+    }).toList();
+
+    // Ensure selected value exists in the items list
+    final validIds = uniqueDevices.map((d) => d['device_id'] as String? ?? '').toSet();
+    final selectedId = (_forecastSelectedDeviceId != null && validIds.contains(_forecastSelectedDeviceId))
+        ? _forecastSelectedDeviceId
+        : null;
+
     return DropdownButtonFormField<String>(
-      value: _forecastSelectedDeviceId,
+      value: selectedId,
       decoration: InputDecoration(
         labelText: 'Select Device',
         prefixIcon: const Icon(Icons.devices, size: 20),
@@ -778,7 +831,7 @@ class _DevicesPageState extends State<DevicesPage> {
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       ),
       isExpanded: true,
-      items: devicesWithModule.map((d) {
+      items: uniqueDevices.map((d) {
         final id = d['device_id'] as String? ?? '';
         final name = d['device_name'] as String? ?? id;
         final loc = d['location'] as String? ?? '';
@@ -2174,62 +2227,78 @@ class _DevicesPageState extends State<DevicesPage> {
     final isExpanded = _expandedDevices[deviceId] ?? false;
     final readings = _deviceReadings[deviceId] ?? [];
     final faults = _deviceFaults[deviceId] ?? [];
-    final activeFaults = faults.where((f) => f['status'] == 'active').toList();
     final hasReadings = readings.isNotEmpty;
-    final latestReading = hasReadings ? readings.first : null;
-    
-    // Check if device is active (last reading < 5 seconds)
+
+    // Check if device is active (last reading within 60 seconds)
     final lastReadingTime = _deviceLastReadings[deviceId];
-    final isActive = lastReadingTime != null && 
-        DateTime.now().difference(lastReadingTime).inSeconds < 5;
+    final isActive = lastReadingTime != null &&
+        DateTime.now().difference(lastReadingTime).inSeconds < 10;
 
-    // Get device health from API or calculate from faults/readings
-    final deviceHealthData = _deviceHealth[deviceId];
-    double healthPercentage = 90.0;
-    String statusText = 'Operating normally';
-    Color statusColor = Colors.green;
-    bool hasInsights = hasReadings;
+    // Determine anomaly status from ML detection results
+    final anomalyData = _deviceAnomalies[deviceId];
+    final bool isAnomaly;
+    final double anomalyScore;
+    final String severity;
+    final String statusText;
+    Color statusColor;
+    IconData statusIcon;
 
-    if (deviceHealthData != null) {
-      // Use health from API
-      healthPercentage = (deviceHealthData['health_score'] as num?)?.toDouble() ?? 90.0;
-      final status = deviceHealthData['status'] as String? ?? 'Good';
-      statusText = deviceHealthData['notes'] != null && 
-          (deviceHealthData['notes'] as List).isNotEmpty
-          ? (deviceHealthData['notes'] as List).first.toString()
-          : 'Operating normally';
-      
-      if (status == 'Critical') {
-        statusColor = Colors.red;
-        statusText = statusText.isEmpty ? 'Critical issues detected' : statusText;
-      } else if (status == 'Fair') {
-        statusColor = Colors.orange;
-        statusText = statusText.isEmpty ? 'Fair condition' : statusText;
+    if (_anomalyLoading) {
+      // Still loading anomaly data
+      isAnomaly = false;
+      anomalyScore = 0.0;
+      severity = '';
+      statusText = 'Analyzing...';
+      statusColor = Colors.grey;
+      statusIcon = Icons.hourglass_top;
+    } else if (_anomalyError == 'model_training') {
+      // Model is still training
+      isAnomaly = false;
+      anomalyScore = 0.0;
+      severity = '';
+      statusText = 'Model training...';
+      statusColor = Colors.blueGrey;
+      statusIcon = Icons.model_training;
+    } else if (_anomalyError != null && anomalyData == null) {
+      // Anomaly API error — fall back to reading-based status
+      isAnomaly = false;
+      anomalyScore = 0.0;
+      severity = '';
+      if (isActive) {
+        statusText = 'Operating Normally';
+        statusColor = const Color(0xFF2E7D32);
+        statusIcon = Icons.check_circle_outline;
+      } else if (lastReadingTime != null) {
+        statusText = 'Idle';
+        statusColor = Colors.blueGrey;
+        statusIcon = Icons.pause_circle_outline;
       } else {
-        statusColor = Colors.green;
-        statusText = statusText.isEmpty ? 'Operating normally' : statusText;
+        statusText = 'No Data';
+        statusColor = Colors.grey;
+        statusIcon = Icons.help_outline;
       }
-    } else if (activeFaults.isNotEmpty) {
-      // Fallback: calculate from faults
-      final criticalFaults = activeFaults.where((f) => f['severity'] == 'Critical').length;
-      final highFaults = activeFaults.where((f) => f['severity'] == 'High').length;
-      if (criticalFaults > 0) {
-        healthPercentage = 30.0;
-        statusText = 'Critical fault detected';
-        statusColor = Colors.red;
-      } else if (highFaults > 0) {
-        healthPercentage = 60.0;
-        statusText = 'Warning: High severity fault';
-        statusColor = Colors.orange;
+    } else if (anomalyData != null) {
+      // Anomaly detected for this device
+      isAnomaly = true;
+      anomalyScore = (anomalyData['anomaly_score'] as num?)?.toDouble() ?? 0.0;
+      severity = anomalyData['severity'] as String? ?? 'Medium';
+      if (severity == 'High') {
+        statusText = 'Anomaly Detected';
+        statusColor = const Color(0xFFD32F2F);
+        statusIcon = Icons.warning_amber_rounded;
       } else {
-        healthPercentage = 75.0;
-        statusText = 'Minor issues detected';
-        statusColor = Colors.orange;
+        statusText = 'Anomaly Detected';
+        statusColor = const Color(0xFFEF6C00);
+        statusIcon = Icons.warning_amber_rounded;
       }
-    } else if (latestReading != null) {
-      // Fallback: calculate from RSSI
-      final rssi = latestReading.wifiRssi ?? -100;
-      healthPercentage = ((rssi + 100) / 50 * 100).clamp(0.0, 100.0);
+    } else {
+      // No anomaly detected — operating normally
+      isAnomaly = false;
+      anomalyScore = 0.0;
+      severity = '';
+      statusText = 'Operating Normally';
+      statusColor = const Color(0xFF2E7D32);
+      statusIcon = Icons.check_circle_outline;
     }
 
     final icon = _getDeviceIcon(deviceType);
@@ -2268,15 +2337,21 @@ class _DevicesPageState extends State<DevicesPage> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            Text(
-                              statusText,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
+                            Icon(statusIcon, size: 14, color: statusColor),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                statusText,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: statusColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             if (isActive) ...[
-                              const SizedBox(width: 4),
+                              const SizedBox(width: 6),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
@@ -2312,7 +2387,7 @@ class _DevicesPageState extends State<DevicesPage> {
                             ),
                           ),
                         ],
-                        if (hasInsights) ...[
+                        if (hasReadings) ...[
                           const SizedBox(height: 2),
                           Row(
                             children: [
@@ -2331,25 +2406,14 @@ class _DevicesPageState extends State<DevicesPage> {
                       ],
                     ),
                   ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        '${healthPercentage.toInt()}%',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: statusColor,
-                        ),
-                      ),
-                      Text(
-                        _getHealthLabel(healthPercentage),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: statusColor,
-                        ),
-                      ),
-                    ],
+                  // Anomaly status indicator (replaces hardcoded percentage)
+                  _buildAnomalyIndicator(
+                    isAnomaly: isAnomaly,
+                    anomalyScore: anomalyScore,
+                    severity: severity,
+                    statusColor: statusColor,
+                    isLoading: _anomalyLoading,
+                    hasError: _anomalyError != null && anomalyData == null,
                   ),
                   const SizedBox(width: 8),
                   Icon(
@@ -2357,16 +2421,6 @@ class _DevicesPageState extends State<DevicesPage> {
                     color: Colors.grey[600],
                   ),
                 ],
-              ),
-            ),
-            // Health progress bar
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: LinearProgressIndicator(
-                value: healthPercentage / 100,
-                backgroundColor: Colors.grey[200],
-                valueColor: AlwaysStoppedAnimation<Color>(statusColor),
-                minHeight: 4,
               ),
             ),
             // Expanded content
@@ -2377,11 +2431,74 @@ class _DevicesPageState extends State<DevicesPage> {
     );
   }
 
-  String _getHealthLabel(double percentage) {
-    if (percentage >= 80) return 'Good';
-    if (percentage >= 60) return 'Fair';
-    if (percentage >= 40) return 'Warning';
-    return 'Critical';
+  Widget _buildAnomalyIndicator({
+    required bool isAnomaly,
+    required double anomalyScore,
+    required String severity,
+    required Color statusColor,
+    required bool isLoading,
+    required bool hasError,
+  }) {
+    if (isLoading) {
+      return SizedBox(
+        width: 20,
+        height: 20,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.grey[400]!),
+        ),
+      );
+    }
+
+    if (hasError) {
+      return Icon(Icons.help_outline, color: Colors.grey[400], size: 28);
+    }
+
+    if (isAnomaly) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: statusColor.withOpacity(0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.warning_amber_rounded, size: 14, color: statusColor),
+                const SizedBox(width: 4),
+                Text(
+                  severity,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: statusColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Score: ${anomalyScore.toStringAsFixed(2)}',
+            style: TextStyle(
+              fontSize: 10,
+              color: Colors.grey[500],
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Normal — green check
+    return Icon(
+      Icons.check_circle,
+      color: statusColor,
+      size: 28,
+    );
   }
 
   Widget _buildExpandedContent(

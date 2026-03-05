@@ -54,6 +54,35 @@ class AnomalyAlertService {
     return jsonDecode(resp.body) as List<dynamic>;
   }
 
+  /// Run anomaly detection on recent energy data per device.
+  /// Returns detected anomalies with anomaly_score and severity.
+  Future<Map<String, dynamic>> detectAnomalies({
+    String? location,
+    int hoursBack = 24,
+    double minScore = 0.3,
+    String method = 'isolation_forest',
+  }) async {
+    final headers = await _authService.getAuthHeaders();
+    headers['Accept'] = 'application/json';
+
+    final params = <String, String>{
+      'hours_back': hoursBack.toString(),
+      'min_score': minScore.toString(),
+      'method': method,
+    };
+    if (location != null) params['location'] = location;
+
+    final uri = Uri.parse(
+      '${ApiConfig.baseUrl}${ApiConfig.anomaliesEndpoint}/detect',
+    ).replace(queryParameters: params);
+
+    final resp = await http.get(uri, headers: headers).timeout(
+      const Duration(seconds: 60),
+    );
+    _ensureOk(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
   /// Fetch anomaly statistics.
   Future<Map<String, dynamic>> fetchStats({int days = 7}) async {
     final headers = await _authService.getAuthHeaders();
