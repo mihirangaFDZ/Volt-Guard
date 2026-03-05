@@ -6,7 +6,7 @@
 class ApiConfig {
   // Base URL for the API
   // Change this to your backend server URL
-  static const String baseUrl = 'http://10.0.2.2:8000';
+  static const String baseUrl = 'https://volt-guard-proj-b8bjh4hze2hdgtap.centralindia-01.azurewebsites.net';
   
   // API version prefix
   static const String apiVersion = '/api/v1';
