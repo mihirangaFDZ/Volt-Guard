@@ -32,6 +32,10 @@ class _DevicesPageState extends State<DevicesPage> {
   Map<String, Map<String, dynamic>> _deviceHealth =
       {}; // Store device health data
 
+  // Relay control state
+  final Map<String, bool> _relayStates = {};
+  final Map<String, bool> _relayLoading = {};
+
   // Summary statistics
   int _totalDevices = 0;
   int _activeDevices = 0;
@@ -60,10 +64,12 @@ class _DevicesPageState extends State<DevicesPage> {
       setState(() {
         _devices = devices;
         _totalDevices = devices.length;
-        // Initialize time ranges to 24h
+        // Initialize time ranges to 24h and relay states
         for (final device in devices) {
           final deviceId = device['device_id'] as String? ?? '';
           _timeRanges[deviceId] = TimeRange.hours24;
+          final relayState = device['relay_state'] as String? ?? 'OFF';
+          _relayStates[deviceId] = relayState == 'ON';
         }
       });
 
@@ -287,6 +293,97 @@ class _DevicesPageState extends State<DevicesPage> {
     setState(() {
       _activeDevices = activeCount;
     });
+  }
+
+  Future<void> _toggleRelay(String deviceId) async {
+    final currentState = _relayStates[deviceId] ?? false;
+    final newState = !currentState;
+
+    // Optimistic update
+    setState(() {
+      _relayStates[deviceId] = newState;
+      _relayLoading[deviceId] = true;
+    });
+
+    try {
+      await _deviceService.updateRelayState(deviceId, newState);
+      if (!mounted) return;
+      setState(() {
+        _relayLoading[deviceId] = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      // Revert on failure
+      setState(() {
+        _relayStates[deviceId] = currentState;
+        _relayLoading[deviceId] = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update relay: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Widget _buildRelayControl(String deviceId) {
+    final isOn = _relayStates[deviceId] ?? false;
+    final isLoading = _relayLoading[deviceId] ?? false;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Row(
+        children: [
+          Icon(
+            Icons.power_settings_new,
+            size: 20,
+            color: isOn ? const Color(0xFF00C853) : Colors.grey,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Power Control',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const Spacer(),
+          if (isLoading)
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: isOn
+                  ? const Color(0xFF00C853).withOpacity(0.1)
+                  : Colors.grey.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              isOn ? 'ON' : 'OFF',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: isOn ? const Color(0xFF00C853) : Colors.grey,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Switch(
+            value: isOn,
+            onChanged: isLoading ? null : (_) => _toggleRelay(deviceId),
+            activeColor: const Color(0xFF00C853),
+            activeTrackColor: const Color(0xFF00C853).withOpacity(0.4),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildSummaryCard() {
@@ -699,6 +796,8 @@ class _DevicesPageState extends State<DevicesPage> {
                 minHeight: 4,
               ),
             ),
+            // Relay control
+            _buildRelayControl(deviceId),
             // Expanded content
             if (isExpanded)
               _buildExpandedContent(deviceId, device, readings, faults),
