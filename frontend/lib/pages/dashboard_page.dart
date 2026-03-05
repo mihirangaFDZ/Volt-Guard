@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:volt_guard/providers/theme_provider.dart';
 
 /// Dashboard page showing real-time energy usage, predictions, and alerts
 class DashboardPage extends StatelessWidget {
@@ -12,23 +10,6 @@ class DashboardPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Energy Dashboard'),
         actions: [
-          // Dark mode toggle
-          Consumer<ThemeProvider>(
-            builder: (context, themeProvider, _) {
-              return IconButton(
-                tooltip: ThemeProvider.labelFor(themeProvider.themeMode),
-                icon: Icon(ThemeProvider.iconFor(themeProvider.themeMode)),
-                onPressed: () {
-                  final next = switch (themeProvider.themeMode) {
-                    ThemeMode.system => ThemeMode.light,
-                    ThemeMode.light => ThemeMode.dark,
-                    ThemeMode.dark => ThemeMode.system,
-                  };
-                  themeProvider.setThemeMode(next);
-                },
-              );
-            },
-          ),
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
             onPressed: () {
@@ -117,10 +98,7 @@ class DashboardPage extends StatelessWidget {
                       'Total Consumption',
                       style: TextStyle(
                         fontSize: 14,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withOpacity(0.6),
+                        color: Colors.grey[600],
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -136,37 +114,36 @@ class DashboardPage extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primaryContainer,
+                    color: Colors.blue[50],
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.bolt,
-                    color: Theme.of(context).colorScheme.primary,
+                    color: Colors.blue,
                     size: 32,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
-            Divider(color: Theme.of(context).colorScheme.outlineVariant),
+            Divider(color: Colors.grey[300]),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _buildQuickStat(
-                    context, 'Estimated Cost', '\$6.82', Colors.green),
+                _buildQuickStat('Estimated Cost', '\$6.82', Colors.green),
                 Container(
                   height: 40,
                   width: 1,
-                  color: Theme.of(context).colorScheme.outlineVariant,
+                  color: Colors.grey[300],
                 ),
-                _buildQuickStat(context, 'Peak Hour', '7-9 PM', Colors.orange),
+                _buildQuickStat('Peak Hour', '7-9 PM', Colors.orange),
                 Container(
                   height: 40,
                   width: 1,
-                  color: Theme.of(context).colorScheme.outlineVariant,
+                  color: Colors.grey[300],
                 ),
-                _buildQuickStat(context, 'Avg. Power', '2.8 kW', Colors.purple),
+                _buildQuickStat('Avg. Power', '2.8 kW', Colors.purple),
               ],
             ),
           ],
@@ -175,8 +152,7 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
-  Widget _buildQuickStat(
-      BuildContext context, String label, String value, Color color) {
+  Widget _buildQuickStat(String label, String value, Color color) {
     return Expanded(
       child: Column(
         children: [
@@ -193,7 +169,7 @@ class DashboardPage extends StatelessWidget {
             label,
             style: TextStyle(
               fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+              color: Colors.grey[600],
             ),
             textAlign: TextAlign.center,
           ),
@@ -212,8 +188,7 @@ class DashboardPage extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.lightbulb_outline,
-                    color: Theme.of(context).colorScheme.tertiary),
+                Icon(Icons.lightbulb_outline, color: Colors.amber[700]),
                 const SizedBox(width: 8),
                 const Text(
                   'AI-Powered Forecast',
@@ -235,10 +210,7 @@ class DashboardPage extends StatelessWidget {
                       'Predicted Usage',
                       style: TextStyle(
                         fontSize: 14,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withOpacity(0.6),
+                        color: Colors.grey[600],
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -253,15 +225,13 @@ class DashboardPage extends StatelessWidget {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Icon(Icons.trending_up,
-                            size: 16,
-                            color: Theme.of(context).colorScheme.error),
+                        Icon(Icons.trending_up, size: 16, color: Colors.red[400]),
                         const SizedBox(width: 4),
                         Text(
                           '+6% from today',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Theme.of(context).colorScheme.error,
+                            color: Colors.red[400],
                           ),
                         ),
                       ],
@@ -275,10 +245,7 @@ class DashboardPage extends StatelessWidget {
                       'Est. Cost',
                       style: TextStyle(
                         fontSize: 14,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withOpacity(0.6),
+                        color: Colors.grey[600],
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -298,22 +265,19 @@ class DashboardPage extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.tertiaryContainer,
+                color: Colors.orange[50],
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.schedule,
-                      color: Theme.of(context).colorScheme.onTertiaryContainer,
-                      size: 20),
+                  Icon(Icons.schedule, color: Colors.orange[700], size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Peak hours expected: 6 PM - 10 PM',
                       style: TextStyle(
                         fontSize: 13,
-                        color:
-                            Theme.of(context).colorScheme.onTertiaryContainer,
+                        color: Colors.orange[900],
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -422,7 +386,7 @@ class DashboardPage extends StatelessWidget {
   Widget _buildEnergySavingsCard(BuildContext context) {
     return Card(
       elevation: 2,
-      color: Theme.of(context).colorScheme.secondaryContainer,
+      color: Colors.green[50],
       child: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
@@ -430,36 +394,32 @@ class DashboardPage extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.eco,
-                    color: Theme.of(context).colorScheme.onSecondaryContainer),
+                Icon(Icons.eco, color: Colors.green[700]),
                 const SizedBox(width: 8),
                 Text(
                   'Optimization Opportunities',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.onSecondaryContainer,
+                    color: Colors.green[900],
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
             _buildSavingsInsight(
-              context,
               'Reduce AC usage by 2°C',
               'Save up to \$1.20/day',
               Icons.ac_unit,
             ),
             const Divider(height: 24),
             _buildSavingsInsight(
-              context,
               'Schedule water heater to off-peak',
               'Save up to \$0.80/day',
               Icons.water_drop,
             ),
             const Divider(height: 24),
             _buildSavingsInsight(
-              context,
               'Enable smart standby mode',
               'Save up to \$0.50/day',
               Icons.power_settings_new,
@@ -468,23 +428,23 @@ class DashboardPage extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.secondary,
+                color: Colors.green[700],
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
+              child: const Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
                     'Total Potential Savings',
                     style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSecondary,
+                      color: Colors.white,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                   Text(
                     '\$2.50/day',
                     style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSecondary,
+                      color: Colors.white,
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
@@ -498,13 +458,10 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
-  Widget _buildSavingsInsight(
-      BuildContext context, String title, String saving, IconData icon) {
+  Widget _buildSavingsInsight(String title, String saving, IconData icon) {
     return Row(
       children: [
-        Icon(icon,
-            color: Theme.of(context).colorScheme.onSecondaryContainer,
-            size: 20),
+        Icon(icon, color: Colors.green[700], size: 20),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -522,15 +479,14 @@ class DashboardPage extends StatelessWidget {
                 saving,
                 style: TextStyle(
                   fontSize: 13,
-                  color: Theme.of(context).colorScheme.onSecondaryContainer,
+                  color: Colors.green[700],
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
         ),
-        Icon(Icons.chevron_right,
-            color: Theme.of(context).colorScheme.outlineVariant),
+        Icon(Icons.chevron_right, color: Colors.grey[400]),
       ],
     );
   }
@@ -539,7 +495,6 @@ class DashboardPage extends StatelessWidget {
     return Column(
       children: [
         _buildDeviceUsageItem(
-          context,
           'Air Conditioner',
           '2.8 kW',
           Icons.ac_unit,
@@ -549,7 +504,6 @@ class DashboardPage extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _buildDeviceUsageItem(
-          context,
           'Water Heater',
           '1.5 kW',
           Icons.water_drop,
@@ -559,7 +513,6 @@ class DashboardPage extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _buildDeviceUsageItem(
-          context,
           'Refrigerator',
           '0.6 kW',
           Icons.kitchen,
@@ -569,7 +522,6 @@ class DashboardPage extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _buildDeviceUsageItem(
-          context,
           'Washing Machine',
           '0.4 kW',
           Icons.local_laundry_service,
@@ -579,7 +531,6 @@ class DashboardPage extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _buildDeviceUsageItem(
-          context,
           'Lighting',
           '0.3 kW',
           Icons.lightbulb,
@@ -592,7 +543,6 @@ class DashboardPage extends StatelessWidget {
   }
 
   Widget _buildDeviceUsageItem(
-    BuildContext context,
     String device,
     String power,
     IconData icon,
@@ -633,10 +583,7 @@ class DashboardPage extends StatelessWidget {
                         'Current: $power',
                         style: TextStyle(
                           fontSize: 13,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withOpacity(0.6),
+                          color: Colors.grey[600],
                         ),
                       ),
                     ],
@@ -666,8 +613,7 @@ class DashboardPage extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: percentage,
                 minHeight: 8,
-                backgroundColor:
-                    Theme.of(context).colorScheme.surfaceContainerHighest,
+                backgroundColor: Colors.grey[200],
                 valueColor: AlwaysStoppedAnimation<Color>(color),
               ),
             ),
@@ -712,7 +658,6 @@ class DashboardPage extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildBehaviorColumn(
-                  context,
                   'Normal',
                   '2.2 kWh',
                   Colors.green,
@@ -721,10 +666,9 @@ class DashboardPage extends StatelessWidget {
                 Container(
                   height: 80,
                   width: 1,
-                  color: Theme.of(context).colorScheme.outlineVariant,
+                  color: Colors.grey[300],
                 ),
                 _buildBehaviorColumn(
-                  context,
                   'Current',
                   '3.2 kWh',
                   Colors.red,
@@ -733,10 +677,9 @@ class DashboardPage extends StatelessWidget {
                 Container(
                   height: 80,
                   width: 1,
-                  color: Theme.of(context).colorScheme.outlineVariant,
+                  color: Colors.grey[300],
                 ),
                 _buildBehaviorColumn(
-                  context,
                   'Difference',
                   '+45%',
                   Colors.orange,
@@ -748,21 +691,19 @@ class DashboardPage extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
+                color: Colors.blue[50],
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline,
-                      color: Theme.of(context).colorScheme.onPrimaryContainer,
-                      size: 20),
+                  Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Device consuming 45% more than usual. Check for issues.',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        color: Colors.blue[900],
                       ),
                     ),
                   ),
@@ -776,7 +717,6 @@ class DashboardPage extends StatelessWidget {
   }
 
   Widget _buildBehaviorColumn(
-    BuildContext context,
     String label,
     String value,
     Color color,
@@ -799,10 +739,12 @@ class DashboardPage extends StatelessWidget {
           label,
           style: TextStyle(
             fontSize: 12,
-            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+            color: Colors.grey[600],
           ),
         ),
       ],
     );
   }
 }
+
+
