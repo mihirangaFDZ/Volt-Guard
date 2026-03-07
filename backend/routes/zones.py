@@ -6,6 +6,7 @@ from app.models.device_model import Device
 from app.models.zone_model import ZoneDetail, ZoneSummary
 from database import analytics_col, devices_col, energy_col
 from utils.jwt_handler import get_current_user
+from app.services.ownership import get_owner_user_id, telemetry_access_query
 import os
 
 router = APIRouter(
@@ -90,31 +91,34 @@ def _to_summary(doc: Dict[str, Any], energy: Optional[Dict[str, Any]] = None) ->
 
 
 @router.post("/{location}/devices")
-def add_device_to_zone(location: str, device: Device):
+def add_device_to_zone(location: str, device: Device, current_user=Depends(get_current_user)):
     """Attach a device to a zone (location), ensuring device_id uniqueness."""
     if device.location and device.location != location:
         raise HTTPException(status_code=400, detail="Device location mismatch with path")
 
-    if devices_col.find_one({"device_id": device.device_id}):
+    owner_user_id = get_owner_user_id(current_user)
+
+    if devices_col.find_one({"device_id": device.device_id, "owner_user_id": owner_user_id}):
         raise HTTPException(status_code=409, detail="Device with this id already exists")
 
     if device.rated_power_watts is None:
         raise HTTPException(status_code=400, detail="rated_power_watts is required")
 
-    doc = device.dict(exclude_unset=True)
+    doc = device.dict(exclude_unset=True, exclude_none=True)
     doc["location"] = location
+    doc["owner_user_id"] = owner_user_id
     devices_col.insert_one(doc)
     return {"message": "Device added to zone", "device_id": device.device_id, "location": location}
 
 
 @router.get("/", response_model=List[ZoneSummary])
-def list_zones(module: Optional[str] = None):
+def list_zones(module: Optional[str] = None, current_user=Depends(get_current_user)):
     """Return one consolidated row per location from occupancy_telemetry."""
-    match: Dict[str, Any] = {}
+    match: Dict[str, Any] = telemetry_access_query(current_user)
     if module:
         match["module"] = module
 
-    energy_map = _to_energy_map(match if module else {})
+    energy_map = _to_energy_map(match)
 
     pipeline = []
     if match:
@@ -143,9 +147,11 @@ def get_zone_detail(
     location: str,
     module: Optional[str] = None,
     limit: int = Query(50, ge=1, le=500, description="Number of history rows to return"),
+    current_user=Depends(get_current_user),
 ):
     """Return latest reading and recent history for a specific location."""
-    query: Dict[str, Any] = {"location": location}
+    query: Dict[str, Any] = telemetry_access_query(current_user)
+    query["location"] = location
     if module:
         query["module"] = module
 
@@ -169,7 +175,8 @@ def get_zone_detail(
 
     history = list(history_cursor)
 
-    energy_query: Dict[str, Any] = {"location": location}
+    energy_query: Dict[str, Any] = telemetry_access_query(current_user)
+    energy_query["location"] = location
     if module:
         energy_query["module"] = module
 

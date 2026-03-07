@@ -31,3 +31,28 @@ anomalies_col = db["anomalies"]
 user_col = db["users"]
 analytics_col = db["occupancy_telemetry"]
 faults_col = db["faults"]
+
+# Uniqueness and query performance indexes
+def _safe_create_index(collection, keys, **kwargs):
+    try:
+        collection.create_index(keys, **kwargs)
+    except Exception:
+        pass
+
+
+_safe_create_index(user_col, "user_id", unique=True)
+_safe_create_index(user_col, "email", unique=True)
+
+_safe_create_index(devices_col, [("owner_user_id", 1), ("device_id", 1)], unique=True)
+_safe_create_index(
+    devices_col,
+    "module_id",
+    unique=True,
+    partialFilterExpression={"module_id": {"$exists": True}},
+)
+
+_safe_create_index(energy_col, "owner_user_id")
+_safe_create_index(prediction_col, "owner_user_id")
+_safe_create_index(anomalies_col, "owner_user_id")
+_safe_create_index(analytics_col, "owner_user_id")
+_safe_create_index(faults_col, "owner_user_id")

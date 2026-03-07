@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from app.models.energy_model import EnergyReading
 from database import energy_col
 from utils.jwt_handler import get_current_user
+from app.services.ownership import get_owner_user_id, telemetry_access_query
 
 router = APIRouter(
     prefix="/energy",
@@ -14,9 +15,12 @@ router = APIRouter(
 )
 
 @router.post("/")
-def add_energy(data: EnergyReading):
+def add_energy(data: EnergyReading, current_user=Depends(get_current_user)):
     """Store incoming current/energy telemetry."""
-    energy_col.insert_one(data.dict(exclude_none=True))
+    owner_user_id = get_owner_user_id(current_user)
+    doc = data.dict(exclude_none=True)
+    doc["owner_user_id"] = owner_user_id
+    energy_col.insert_one(doc)
     return {"message": "Energy data stored"}
 
 
@@ -100,9 +104,10 @@ def get_latest_energy(
     limit: int = Query(50, ge=1, le=500),
     module: Optional[str] = None,
     location: Optional[str] = None,
+    current_user=Depends(get_current_user),
 ):
     """Return the most recent energy/current readings, newest first."""
-    query = {}
+    query = telemetry_access_query(current_user)
     if module:
         query["module"] = module
     if location:
@@ -118,9 +123,9 @@ def get_latest_energy(
 
 
 @router.get("/by-location")
-def get_latest_energy_by_location(module: Optional[str] = None):
+def get_latest_energy_by_location(module: Optional[str] = None, current_user=Depends(get_current_user)):
     """Return the latest reading per location (one row per location)."""
-    match = {}
+    match = telemetry_access_query(current_user)
     if module:
         match["module"] = module
 
@@ -145,9 +150,10 @@ def get_energy_usage(
     limit: int = Query(2000, ge=10, le=20000),
     module: Optional[str] = None,
     location: Optional[str] = None,
+    current_user=Depends(get_current_user),
 ):
     """Return approximate cumulative energy (kWh) per location over the fetched readings."""
-    query = {}
+    query = telemetry_access_query(current_user)
     if module:
         query["module"] = module
     if location:
