@@ -355,16 +355,22 @@ class _DevicesPageState extends State<DevicesPage> {
   }
 
   void _toggleDevice(String deviceId) {
+    final isExpanded = _expandedDevices[deviceId] ?? false;
     setState(() {
-      final isExpanded = _expandedDevices[deviceId] ?? false;
       _expandedDevices[deviceId] = !isExpanded;
-
-      if (!isExpanded) {
-        // Expanding: load data
-        _loadDeviceData(deviceId);
-        _loadDeviceProfile(deviceId);
-      }
     });
+
+    if (!isExpanded) {
+      // Expanding: load readings first, then only load behavioral profile
+      // (ML-heavy call) if the device actually has energy data
+      _loadDeviceData(deviceId).then((_) {
+        if (!mounted) return;
+        final readings = _deviceReadings[deviceId] ?? [];
+        if (readings.isNotEmpty) {
+          _loadDeviceProfile(deviceId);
+        }
+      });
+    }
   }
 
   int _getHoursForRange(TimeRange range) {
@@ -578,7 +584,7 @@ class _DevicesPageState extends State<DevicesPage> {
   Widget _buildSummaryCard() {
     return Card(
       elevation: 2,
-      color: Colors.blue[50],
+      color: Theme.of(context).colorScheme.primaryContainer,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -642,7 +648,7 @@ class _DevicesPageState extends State<DevicesPage> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withOpacity(0.3)),
       ),
@@ -793,7 +799,10 @@ class _DevicesPageState extends State<DevicesPage> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Colors.indigo.shade50, Colors.white],
+            colors: [
+              Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+              Theme.of(context).colorScheme.surface,
+            ],
           ),
         ),
         padding: const EdgeInsets.all(16),
@@ -806,7 +815,7 @@ class _DevicesPageState extends State<DevicesPage> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.indigo.shade100,
+                    color: Theme.of(context).colorScheme.primaryContainer,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(Icons.auto_graph,
@@ -838,19 +847,21 @@ class _DevicesPageState extends State<DevicesPage> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: Theme.of(context).colorScheme.errorContainer,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   children: [
                     Icon(Icons.error_outline,
-                        color: Colors.red.shade700, size: 20),
+                        color: Theme.of(context).colorScheme.onErrorContainer,
+                        size: 20),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _forecastError!,
-                        style:
-                            TextStyle(color: Colors.red.shade700, fontSize: 12),
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.onErrorContainer,
+                            fontSize: 12),
                       ),
                     ),
                     TextButton(
@@ -941,7 +952,7 @@ class _DevicesPageState extends State<DevicesPage> {
         prefixIcon: const Icon(Icons.devices, size: 20),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       ),
@@ -1064,9 +1075,10 @@ class _DevicesPageState extends State<DevicesPage> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.grey.shade200),
+            border: Border.all(
+                color: Theme.of(context).colorScheme.outlineVariant),
           ),
           child: Row(
             children: [
@@ -1231,9 +1243,34 @@ class _DevicesPageState extends State<DevicesPage> {
       ...forecastSpots.map((s) => s.y),
       ...confHighSpots.map((s) => s.y),
     ];
-    final maxY = allValues.isEmpty
-        ? 10.0
-        : allValues.reduce((a, b) => a > b ? a : b) * 1.2;
+    final rawMax = allValues.isEmpty
+        ? 0.0
+        : allValues.reduce((a, b) => a > b ? a : b);
+    final maxY = (rawMax * 1.2).clamp(1.0, double.infinity);
+
+    // No meaningful energy data — all values are zero
+    if (rawMax == 0.0) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Column(
+            children: [
+              Icon(Icons.show_chart, size: 48, color: Colors.grey[400]),
+              const SizedBox(height: 8),
+              Text(
+                'No energy data available for forecast',
+                style: TextStyle(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.6)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final totalDays = dailyHistorical.length + dailyForecast.length;
 
     // Build day labels
@@ -1266,7 +1303,7 @@ class _DevicesPageState extends State<DevicesPage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
+                color: Theme.of(context).colorScheme.primaryContainer,
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Row(
@@ -1284,7 +1321,7 @@ class _DevicesPageState extends State<DevicesPage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.indigo.shade50,
+                color: Theme.of(context).colorScheme.secondaryContainer,
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Row(
@@ -1517,9 +1554,10 @@ class _DevicesPageState extends State<DevicesPage> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.green.shade100),
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1568,8 +1606,8 @@ class _DevicesPageState extends State<DevicesPage> {
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: monthlyChange > 0
-                    ? Colors.orange.shade50
-                    : Colors.green.shade50,
+                    ? Theme.of(context).colorScheme.tertiaryContainer
+                    : Theme.of(context).colorScheme.tertiaryContainer,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Row(
@@ -1604,7 +1642,7 @@ class _DevicesPageState extends State<DevicesPage> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: Theme.of(context).colorScheme.tertiaryContainer,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Row(
@@ -1660,9 +1698,10 @@ class _DevicesPageState extends State<DevicesPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.amber.shade50,
+        color: Theme.of(context).colorScheme.tertiaryContainer,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.amber.shade200),
+        border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: SwitchListTile(
         contentPadding: EdgeInsets.zero,
@@ -1698,7 +1737,10 @@ class _DevicesPageState extends State<DevicesPage> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Colors.teal.shade50, Colors.white],
+            colors: [
+              Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.5),
+              Theme.of(context).colorScheme.surface,
+            ],
           ),
         ),
         padding: const EdgeInsets.all(16),
@@ -1711,7 +1753,7 @@ class _DevicesPageState extends State<DevicesPage> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.teal.shade100,
+                    color: Theme.of(context).colorScheme.secondaryContainer,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(Icons.leaderboard,
@@ -1774,7 +1816,7 @@ class _DevicesPageState extends State<DevicesPage> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.teal.shade50,
+                  color: Theme.of(context).colorScheme.secondaryContainer,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -1883,7 +1925,7 @@ class _DevicesPageState extends State<DevicesPage> {
                   margin: const EdgeInsets.only(bottom: 6),
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: riskColor.withValues(alpha: 0.2)),
                   ),
@@ -1895,8 +1937,8 @@ class _DevicesPageState extends State<DevicesPage> {
                         height: 28,
                         decoration: BoxDecoration(
                           color: rank <= 3
-                              ? Colors.teal.shade100
-                              : Colors.grey.shade100,
+                              ? Theme.of(context).colorScheme.secondaryContainer
+                              : Theme.of(context).colorScheme.surfaceContainerHigh,
                           shape: BoxShape.circle,
                         ),
                         child: Center(
@@ -1994,7 +2036,9 @@ class _DevicesPageState extends State<DevicesPage> {
   Widget _buildEnergyVampiresCard() {
     return Card(
       elevation: 2,
-      color: _energyVampires.isNotEmpty ? Colors.red[50] : Colors.green[50],
+      color: _energyVampires.isNotEmpty
+          ? Theme.of(context).colorScheme.errorContainer
+          : Theme.of(context).colorScheme.tertiaryContainer,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -2050,7 +2094,7 @@ class _DevicesPageState extends State<DevicesPage> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.green[100],
+                    color: Theme.of(context).colorScheme.tertiaryContainer,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
@@ -2072,7 +2116,7 @@ class _DevicesPageState extends State<DevicesPage> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.red.withOpacity(0.2)),
                   ),
@@ -2135,7 +2179,7 @@ class _DevicesPageState extends State<DevicesPage> {
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: sevColor.withOpacity(0.3)),
                     ),
@@ -2799,20 +2843,23 @@ class _DevicesPageState extends State<DevicesPage> {
                   padding: const EdgeInsets.all(12),
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: Colors.red[50],
+                    color: Theme.of(context).colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red[200]!),
+                    border: Border.all(
+                        color: Theme.of(context).colorScheme.error.withOpacity(0.3)),
                   ),
                   child: Row(
                     children: [
                       Icon(Icons.error_outline,
-                          color: Colors.red[700], size: 20),
+                          color: Theme.of(context).colorScheme.onErrorContainer,
+                          size: 20),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           error,
-                          style:
-                              TextStyle(color: Colors.red[700], fontSize: 12),
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.onErrorContainer,
+                              fontSize: 12),
                         ),
                       ),
                       TextButton(
@@ -2904,16 +2951,19 @@ class _DevicesPageState extends State<DevicesPage> {
       padding: const EdgeInsets.all(12),
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: Colors.red[50],
+        color: Theme.of(context).colorScheme.errorContainer,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.red[200]!),
+        border: Border.all(
+            color: Theme.of(context).colorScheme.error.withOpacity(0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.warning, color: Colors.red[700], size: 20),
+              Icon(Icons.warning,
+                  color: Theme.of(context).colorScheme.onErrorContainer,
+                  size: 20),
               const SizedBox(width: 8),
               Text(
                 'Active Faults: ${activeFaults.length}',
