@@ -44,6 +44,28 @@ class EnergyService {
     throw Exception('Failed to get latest energy by location (status ${response.statusCode})');
   }
 
+  /// Alias for current power per location used by dashboards.
+  static Future<List<dynamic>> getCurrentPower({String? module}) {
+    return getLatestByLocation(module: module);
+  }
+
+  /// Aggregated energy usage (kWh) per location using backend integration.
+  static Future<Map<String, dynamic>> getEnergyUsage({String? location, String? module, int limit = 2000}) async {
+    final headers = await _authService.getAuthHeaders();
+    final params = <String, String>{'limit': limit.toString()};
+    if (location != null) params['location'] = location;
+    if (module != null) params['module'] = module;
+
+    final uri = Uri.parse('${ApiConfig.baseUrl}/energy/usage').replace(queryParameters: params);
+
+    final response = await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data;
+    }
+    throw Exception('Failed to get energy usage (status ${response.statusCode})');
+  }
+
   /// Format current in Amperes
   static String formatCurrent(double amperes) {
     if (amperes < 0.001) {

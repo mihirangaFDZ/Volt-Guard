@@ -14,7 +14,8 @@ class ZonesService {
   Future<List<Map<String, dynamic>>> fetchZoneSummaries({String? module}) async {
     final headers = await _authService.getAuthHeaders();
     final query = module != null ? '?module=${Uri.encodeComponent(module)}' : '';
-    final uri = Uri.parse('${ApiConfig.baseUrl}/zones$query');
+    // Add trailing slash to avoid 307 redirect on Azure
+    final uri = Uri.parse('${ApiConfig.baseUrl}/zones/$query');
 
     final response = await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
     if (response.statusCode == 200) {
@@ -42,8 +43,9 @@ class ZonesService {
   /// Fetch devices for a specific location/zone
   Future<List<Map<String, dynamic>>> fetchDevicesForLocation(String location) async {
     final headers = await _authService.getAuthHeaders();
+    // Add trailing slash to avoid 307 redirect on Azure
     final uri = Uri.parse(
-      '${ApiConfig.baseUrl}${ApiConfig.devicesEndpoint}?location=${Uri.encodeComponent(location)}',
+      '${ApiConfig.baseUrl}${ApiConfig.devicesEndpoint}/?location=${Uri.encodeComponent(location)}',
     );
 
     final response = await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);

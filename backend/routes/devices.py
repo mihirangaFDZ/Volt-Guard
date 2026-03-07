@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from database import devices_col, energy_col
-from app.models.device_model import Device
+from app.models.device_model import Device, RelayStateUpdate
 from utils.jwt_handler import get_current_user
 
 router = APIRouter(
@@ -105,3 +105,67 @@ def update_device_module(device_id: str, module_id: str):
 def delete_device(device_id: str):
     devices_col.delete_one({"device_id": device_id})
     return {"message": "Device removed"}
+
+
+@router.put("/{device_id}/relay")
+def update_relay_state(device_id: str, payload: RelayStateUpdate):
+    """
+    Update the desired relay state for a device.
+    Called by the Flutter app when user toggles the switch.
+    """
+    if payload.relay_state not in ("ON", "OFF"):
+        raise HTTPException(status_code=400, detail="relay_state must be 'ON' or 'OFF'")
+
+    device = devices_col.find_one({"device_id": device_id})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    devices_col.update_one(
+        {"device_id": device_id},
+        {"$set": {"relay_state": payload.relay_state}}
+    )
+
+    return {
+        "message": f"Relay state updated to {payload.relay_state}",
+        "device_id": device_id,
+        "relay_state": payload.relay_state,
+    }
+
+
+@router.get("/{device_id}/relay")
+def get_relay_state(device_id: str):
+    """
+    Get the current desired relay state for a device.
+    """
+    device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    return {
+        "device_id": device_id,
+        "relay_state": device.get("relay_state", "OFF"),
+    }
+
+
+# ── ESP32 public router (no JWT auth) ──────────────────────────────────
+esp32_router = APIRouter(
+    prefix="/esp32",
+    tags=["ESP32"],
+)
+
+
+@esp32_router.get("/relay-status/{module_id}")
+def get_relay_status_by_module(module_id: str):
+    """
+    ESP32 polls this endpoint to get the desired relay state by module_id.
+    No authentication required.
+    """
+    device = devices_col.find_one({"module_id": module_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="No device found with this module_id")
+
+    return {
+        "module_id": module_id,
+        "device_id": device.get("device_id"),
+        "relay_state": device.get("relay_state", "OFF"),
+    }

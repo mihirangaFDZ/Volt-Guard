@@ -34,12 +34,20 @@ class _DevicesPageState extends State<DevicesPage> {
   final Map<String, TimeRange> _timeRanges = {};
   final Map<String, List<dynamic>> _deviceFaults = {};
   final Map<String, bool> _loadingFaults = {};
+  Map<String, Map<String, dynamic>> _deviceHealth =
+      {}; // Store device health data
+
+  // Relay control state
+  final Map<String, bool> _relayStates = {};
+  final Map<String, bool> _relayLoading = {};
+
   // Summary statistics
   int _totalDevices = 0;
   int _activeDevices = 0;
   int _totalFaults = 0;
   bool _loadingSummary = false;
-  final Map<String, DateTime?> _deviceLastReadings = {}; // Track last reading time per device
+  final Map<String, DateTime?> _deviceLastReadings =
+      {}; // Track last reading time per device
 
   // Energy vampire / behavioral profiles
   List<dynamic> _energyVampires = [];
@@ -88,10 +96,12 @@ class _DevicesPageState extends State<DevicesPage> {
       setState(() {
         _devices = devices;
         _totalDevices = devices.length;
-        // Initialize time ranges to 24h
+        // Initialize time ranges to 24h and relay states
         for (final device in devices) {
           final deviceId = device['device_id'] as String? ?? '';
           _timeRanges[deviceId] = TimeRange.hours24;
+          final relayState = device['relay_state'] as String? ?? 'OFF';
+          _relayStates[deviceId] = relayState == 'ON';
         }
       });
 
@@ -109,7 +119,8 @@ class _DevicesPageState extends State<DevicesPage> {
 
       // Auto-select first device with module_id for forecast
       final devicesWithModule = _devices
-          .where((d) => d['module_id'] != null && (d['module_id'] as String).isNotEmpty)
+          .where((d) =>
+              d['module_id'] != null && (d['module_id'] as String).isNotEmpty)
           .toList();
       if (devicesWithModule.isNotEmpty) {
         final firstId = devicesWithModule.first['device_id'] as String? ?? '';
@@ -149,7 +160,8 @@ class _DevicesPageState extends State<DevicesPage> {
         msg = 'LSTM model is still loading. Please try again in a moment.';
       } else if (msg.contains('400')) {
         msg = 'Not enough energy data for this device to generate a forecast.';
-      } else if (msg.contains('TimeoutException') || msg.contains('timed out')) {
+      } else if (msg.contains('TimeoutException') ||
+          msg.contains('timed out')) {
         msg = 'Forecast request timed out. The LSTM model may be busy.';
       }
       setState(() {
@@ -176,7 +188,8 @@ class _DevicesPageState extends State<DevicesPage> {
       String msg = e.toString();
       if (msg.contains('503')) {
         msg = 'LSTM model is still loading. Please pull to refresh.';
-      } else if (msg.contains('TimeoutException') || msg.contains('timed out')) {
+      } else if (msg.contains('TimeoutException') ||
+          msg.contains('timed out')) {
         msg = 'Comparison request timed out. Try refreshing.';
       }
       setState(() {
@@ -196,7 +209,8 @@ class _DevicesPageState extends State<DevicesPage> {
       if (!mounted) return;
 
       final vampires = data['vampires'] as List<dynamic>? ?? [];
-      final totalWaste = (data['total_energy_waste_kwh'] as num?)?.toDouble() ?? 0.0;
+      final totalWaste =
+          (data['total_energy_waste_kwh'] as num?)?.toDouble() ?? 0.0;
 
       // Also cache profiles by device_id
       final profileMap = <String, Map<String, dynamic>>{};
@@ -223,7 +237,8 @@ class _DevicesPageState extends State<DevicesPage> {
   Future<void> _loadDeviceProfile(String deviceId) async {
     if (_deviceProfiles.containsKey(deviceId)) return;
     try {
-      final profile = await _profileService.fetchDeviceProfile(deviceId, hoursBack: 168);
+      final profile =
+          await _profileService.fetchDeviceProfile(deviceId, hoursBack: 168);
       if (!mounted) return;
       setState(() {
         _deviceProfiles[deviceId] = profile;
@@ -263,8 +278,8 @@ class _DevicesPageState extends State<DevicesPage> {
       // Group anomalies by device_id, keeping the highest score per device
       final anomalyMap = <String, Map<String, dynamic>>{};
       for (final a in anomalies) {
-        final deviceId = a['device_id'] as String? ??
-            a['location'] as String? ?? '';
+        final deviceId =
+            a['device_id'] as String? ?? a['location'] as String? ?? '';
         if (deviceId.isEmpty) continue;
 
         final score = (a['anomaly_score'] as num?)?.toDouble() ?? 0.0;
@@ -292,11 +307,11 @@ class _DevicesPageState extends State<DevicesPage> {
     try {
       // Fetch active faults
       final activeFaults = await _faultService.fetchActive(limit: 100);
-      
+
       // Check active devices by fetching latest readings for each device
       int activeCount = 0;
       final now = DateTime.now();
-      
+
       for (final device in _devices) {
         final deviceId = device['device_id'] as String? ?? '';
         try {
@@ -311,7 +326,7 @@ class _DevicesPageState extends State<DevicesPage> {
             final lastReading = readings.first;
             final timeDiff = now.difference(lastReading.receivedAt);
             _deviceLastReadings[deviceId] = lastReading.receivedAt;
-            
+
             // Active if last reading is within the last hour (matches fetch window)
             if (timeDiff.inMinutes < 60) {
               activeCount++;
@@ -322,7 +337,7 @@ class _DevicesPageState extends State<DevicesPage> {
           _deviceLastReadings[deviceId] = null;
         }
       }
-      
+
       if (!mounted) return;
       setState(() {
         _activeDevices = activeCount;
@@ -405,12 +420,12 @@ class _DevicesPageState extends State<DevicesPage> {
         _deviceReadings[deviceId] = readings;
         _loadingReadings[deviceId] = false;
         _lastUpdated[deviceId] = now;
-        
+
         // Update last reading time for active device calculation
         if (readings.isNotEmpty) {
           _deviceLastReadings[deviceId] = readings.first.receivedAt;
         }
-        
+
         // Recalculate active devices count
         _recalculateActiveDevices();
       });
@@ -431,7 +446,8 @@ class _DevicesPageState extends State<DevicesPage> {
     });
 
     try {
-      final faults = await _faultService.fetchDeviceFaultHistory(deviceId, limit: 50);
+      final faults =
+          await _faultService.fetchDeviceFaultHistory(deviceId, limit: 50);
       if (!mounted) return;
 
       setState(() {
@@ -466,6 +482,97 @@ class _DevicesPageState extends State<DevicesPage> {
     setState(() {
       _activeDevices = activeCount;
     });
+  }
+
+  Future<void> _toggleRelay(String deviceId) async {
+    final currentState = _relayStates[deviceId] ?? false;
+    final newState = !currentState;
+
+    // Optimistic update
+    setState(() {
+      _relayStates[deviceId] = newState;
+      _relayLoading[deviceId] = true;
+    });
+
+    try {
+      await _deviceService.updateRelayState(deviceId, newState);
+      if (!mounted) return;
+      setState(() {
+        _relayLoading[deviceId] = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      // Revert on failure
+      setState(() {
+        _relayStates[deviceId] = currentState;
+        _relayLoading[deviceId] = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update relay: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Widget _buildRelayControl(String deviceId) {
+    final isOn = _relayStates[deviceId] ?? false;
+    final isLoading = _relayLoading[deviceId] ?? false;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Row(
+        children: [
+          Icon(
+            Icons.power_settings_new,
+            size: 20,
+            color: isOn ? const Color(0xFF00C853) : Colors.grey,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Power Control',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const Spacer(),
+          if (isLoading)
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: isOn
+                  ? const Color(0xFF00C853).withOpacity(0.1)
+                  : Colors.grey.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              isOn ? 'ON' : 'OFF',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: isOn ? const Color(0xFF00C853) : Colors.grey,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Switch(
+            value: isOn,
+            onChanged: isLoading ? null : (_) => _toggleRelay(deviceId),
+            activeColor: const Color(0xFF00C853),
+            activeTrackColor: const Color(0xFF00C853).withOpacity(0.4),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildSummaryCard() {
@@ -530,7 +637,8 @@ class _DevicesPageState extends State<DevicesPage> {
     );
   }
 
-  Widget _buildSummaryItem(String label, String value, IconData icon, Color color) {
+  Widget _buildSummaryItem(
+      String label, String value, IconData icon, Color color) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -645,7 +753,9 @@ class _DevicesPageState extends State<DevicesPage> {
             const SizedBox(height: 16),
             Text(
               'No devices found',
-              style: TextStyle(color: Colors.grey[600]),
+              style: TextStyle(
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
             ),
           ],
         ),
@@ -699,7 +809,8 @@ class _DevicesPageState extends State<DevicesPage> {
                     color: Colors.indigo.shade100,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(Icons.auto_graph, color: Colors.indigo.shade700, size: 22),
+                  child: Icon(Icons.auto_graph,
+                      color: Colors.indigo.shade700, size: 22),
                 ),
                 const SizedBox(width: 10),
                 const Expanded(
@@ -732,12 +843,14 @@ class _DevicesPageState extends State<DevicesPage> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.error_outline, color: Colors.red.shade700, size: 20),
+                    Icon(Icons.error_outline,
+                        color: Colors.red.shade700, size: 20),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _forecastError!,
-                        style: TextStyle(color: Colors.red.shade700, fontSize: 12),
+                        style:
+                            TextStyle(color: Colors.red.shade700, fontSize: 12),
                       ),
                     ),
                     TextButton(
@@ -803,8 +916,7 @@ class _DevicesPageState extends State<DevicesPage> {
   Widget _buildForecastDeviceDropdown() {
     final devicesWithModule = _devices
         .where((d) =>
-            d['module_id'] != null &&
-            (d['module_id'] as String).isNotEmpty)
+            d['module_id'] != null && (d['module_id'] as String).isNotEmpty)
         .toList();
 
     // Deduplicate by device_id to prevent DropdownButton assertion errors
@@ -815,8 +927,10 @@ class _DevicesPageState extends State<DevicesPage> {
     }).toList();
 
     // Ensure selected value exists in the items list
-    final validIds = uniqueDevices.map((d) => d['device_id'] as String? ?? '').toSet();
-    final selectedId = (_forecastSelectedDeviceId != null && validIds.contains(_forecastSelectedDeviceId))
+    final validIds =
+        uniqueDevices.map((d) => d['device_id'] as String? ?? '').toSet();
+    final selectedId = (_forecastSelectedDeviceId != null &&
+            validIds.contains(_forecastSelectedDeviceId))
         ? _forecastSelectedDeviceId
         : null;
 
@@ -828,7 +942,8 @@ class _DevicesPageState extends State<DevicesPage> {
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       ),
       isExpanded: true,
       items: uniqueDevices.map((d) {
@@ -837,7 +952,8 @@ class _DevicesPageState extends State<DevicesPage> {
         final loc = d['location'] as String? ?? '';
         return DropdownMenuItem(
           value: id,
-          child: Text('$name${loc.isNotEmpty ? " ($loc)" : ""}', overflow: TextOverflow.ellipsis),
+          child: Text('$name${loc.isNotEmpty ? " ($loc)" : ""}',
+              overflow: TextOverflow.ellipsis),
         );
       }).toList(),
       onChanged: (newId) {
@@ -905,7 +1021,8 @@ class _DevicesPageState extends State<DevicesPage> {
             Expanded(
               child: Text(
                 deviceName,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                style:
+                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
               ),
             ),
             Container(
@@ -969,7 +1086,8 @@ class _DevicesPageState extends State<DevicesPage> {
                     ),
                     Text(
                       'Next 7 Days',
-                      style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                      style:
+                          TextStyle(fontSize: 10, color: Colors.grey.shade600),
                     ),
                   ],
                 ),
@@ -991,7 +1109,8 @@ class _DevicesPageState extends State<DevicesPage> {
                     ),
                     Text(
                       'vs Last Week',
-                      style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                      style:
+                          TextStyle(fontSize: 10, color: Colors.grey.shade600),
                     ),
                   ],
                 ),
@@ -1002,7 +1121,8 @@ class _DevicesPageState extends State<DevicesPage> {
                 child: Column(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: riskColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
@@ -1019,7 +1139,8 @@ class _DevicesPageState extends State<DevicesPage> {
                     const SizedBox(height: 4),
                     Text(
                       'Risk Level',
-                      style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                      style:
+                          TextStyle(fontSize: 10, color: Colors.grey.shade600),
                     ),
                   ],
                 ),
@@ -1058,7 +1179,8 @@ class _DevicesPageState extends State<DevicesPage> {
 
   Widget _buildForecastChart() {
     final forecast = _deviceForecast!;
-    final dailyHistorical = forecast['daily_historical'] as List<dynamic>? ?? [];
+    final dailyHistorical =
+        forecast['daily_historical'] as List<dynamic>? ?? [];
     final dailyForecast = forecast['daily_forecast'] as List<dynamic>? ?? [];
 
     if (dailyHistorical.isEmpty && dailyForecast.isEmpty) {
@@ -1069,7 +1191,8 @@ class _DevicesPageState extends State<DevicesPage> {
     final historicalSpots = <FlSpot>[];
     for (int i = 0; i < dailyHistorical.length; i++) {
       final day = dailyHistorical[i] as Map<String, dynamic>;
-      historicalSpots.add(FlSpot(i.toDouble(), (day['actual_kwh'] as num).toDouble()));
+      historicalSpots
+          .add(FlSpot(i.toDouble(), (day['actual_kwh'] as num).toDouble()));
     }
 
     // Build forecast spots with bridge point
@@ -1108,7 +1231,9 @@ class _DevicesPageState extends State<DevicesPage> {
       ...forecastSpots.map((s) => s.y),
       ...confHighSpots.map((s) => s.y),
     ];
-    final maxY = allValues.isEmpty ? 10.0 : allValues.reduce((a, b) => a > b ? a : b) * 1.2;
+    final maxY = allValues.isEmpty
+        ? 10.0
+        : allValues.reduce((a, b) => a > b ? a : b) * 1.2;
     final totalDays = dailyHistorical.length + dailyForecast.length;
 
     // Build day labels
@@ -1149,7 +1274,9 @@ class _DevicesPageState extends State<DevicesPage> {
                 children: [
                   Container(width: 12, height: 2, color: Colors.blue),
                   const SizedBox(width: 4),
-                  Text('Actual', style: TextStyle(fontSize: 9, color: Colors.blue.shade700)),
+                  Text('Actual',
+                      style:
+                          TextStyle(fontSize: 9, color: Colors.blue.shade700)),
                 ],
               ),
             ),
@@ -1165,7 +1292,9 @@ class _DevicesPageState extends State<DevicesPage> {
                 children: [
                   _buildDottedLine(),
                   const SizedBox(width: 4),
-                  Text('Predicted', style: TextStyle(fontSize: 9, color: Colors.indigo.shade700)),
+                  Text('Predicted',
+                      style: TextStyle(
+                          fontSize: 9, color: Colors.indigo.shade700)),
                 ],
               ),
             ),
@@ -1202,8 +1331,10 @@ class _DevicesPageState extends State<DevicesPage> {
                 },
               ),
               titlesData: FlTitlesData(
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles:
+                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles:
+                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 bottomTitles: AxisTitles(
                   sideTitles: SideTitles(
                     showTitles: true,
@@ -1221,8 +1352,12 @@ class _DevicesPageState extends State<DevicesPage> {
                           dayLabels[idx],
                           style: TextStyle(
                             fontSize: 9,
-                            color: isForecast ? Colors.indigo.shade600 : Colors.grey.shade600,
-                            fontWeight: isForecast ? FontWeight.bold : FontWeight.normal,
+                            color: isForecast
+                                ? Colors.indigo.shade600
+                                : Colors.grey.shade600,
+                            fontWeight: isForecast
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                           ),
                         ),
                       );
@@ -1237,7 +1372,8 @@ class _DevicesPageState extends State<DevicesPage> {
                     getTitlesWidget: (value, meta) {
                       return Text(
                         value.toStringAsFixed(1),
-                        style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
+                        style:
+                            TextStyle(fontSize: 9, color: Colors.grey.shade500),
                       );
                     },
                   ),
@@ -1253,12 +1389,17 @@ class _DevicesPageState extends State<DevicesPage> {
                       if (dayIndex >= dailyHistorical.length) {
                         final fIdx = dayIndex - dailyHistorical.length;
                         if (fIdx >= 0 && fIdx < dailyForecast.length) {
-                          final day = dailyForecast[fIdx] as Map<String, dynamic>;
+                          final day =
+                              dailyForecast[fIdx] as Map<String, dynamic>;
                           final peakHour = day['peak_hour'] ?? 0;
-                          final confLow = (day['confidence_low_kwh'] as num).toDouble();
-                          final confHigh = (day['confidence_high_kwh'] as num).toDouble();
-                          final effectLow = _scenarioReducedUsage ? confLow * 0.9 : confLow;
-                          final effectHigh = _scenarioReducedUsage ? confHigh * 0.9 : confHigh;
+                          final confLow =
+                              (day['confidence_low_kwh'] as num).toDouble();
+                          final confHigh =
+                              (day['confidence_high_kwh'] as num).toDouble();
+                          final effectLow =
+                              _scenarioReducedUsage ? confLow * 0.9 : confLow;
+                          final effectHigh =
+                              _scenarioReducedUsage ? confHigh * 0.9 : confHigh;
                           return LineTooltipItem(
                             '${spot.y.toStringAsFixed(1)} kWh\n'
                             'Peak: ${peakHour.toString().padLeft(2, "0")}:00\n'
@@ -1345,12 +1486,14 @@ class _DevicesPageState extends State<DevicesPage> {
   Widget _buildDottedLine() {
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: List.generate(3, (i) => Container(
-        width: 3,
-        height: 2,
-        margin: const EdgeInsets.symmetric(horizontal: 0.5),
-        color: Colors.indigo,
-      )),
+      children: List.generate(
+          3,
+          (i) => Container(
+                width: 3,
+                height: 2,
+                margin: const EdgeInsets.symmetric(horizontal: 0.5),
+                color: Colors.indigo,
+              )),
     );
   }
 
@@ -1359,10 +1502,12 @@ class _DevicesPageState extends State<DevicesPage> {
     final weeklyLkr = (cost['weekly_cost_lkr'] as num).toDouble();
     final monthlyLkr = (cost['monthly_projection_lkr'] as num).toDouble();
     final lastWeekLkr = (cost['last_week_cost_lkr'] as num).toDouble();
-    final savingsLkr = (cost['weekly_savings_if_reduced_10pct_lkr'] as num).toDouble();
+    final savingsLkr =
+        (cost['weekly_savings_if_reduced_10pct_lkr'] as num).toDouble();
 
     final effectiveWeekly = _scenarioReducedUsage ? weeklyLkr * 0.9 : weeklyLkr;
-    final effectiveMonthly = _scenarioReducedUsage ? monthlyLkr * 0.9 : monthlyLkr;
+    final effectiveMonthly =
+        _scenarioReducedUsage ? monthlyLkr * 0.9 : monthlyLkr;
 
     // Determine monthly change message
     final monthlyChange = lastWeekLkr > 0
@@ -1422,14 +1567,18 @@ class _DevicesPageState extends State<DevicesPage> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: monthlyChange > 0 ? Colors.orange.shade50 : Colors.green.shade50,
+                color: monthlyChange > 0
+                    ? Colors.orange.shade50
+                    : Colors.green.shade50,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Row(
                 children: [
                   Icon(
                     monthlyChange > 0 ? Icons.trending_up : Icons.trending_down,
-                    color: monthlyChange > 0 ? Colors.orange.shade700 : Colors.green.shade700,
+                    color: monthlyChange > 0
+                        ? Colors.orange.shade700
+                        : Colors.green.shade700,
                     size: 16,
                   ),
                   const SizedBox(width: 8),
@@ -1565,7 +1714,8 @@ class _DevicesPageState extends State<DevicesPage> {
                     color: Colors.teal.shade100,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(Icons.leaderboard, color: Colors.teal.shade700, size: 22),
+                  child: Icon(Icons.leaderboard,
+                      color: Colors.teal.shade700, size: 22),
                 ),
                 const SizedBox(width: 10),
                 const Expanded(
@@ -1642,11 +1792,13 @@ class _DevicesPageState extends State<DevicesPage> {
                         ),
                         Text(
                           'Total Predicted',
-                          style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                          style: TextStyle(
+                              fontSize: 10, color: Colors.grey.shade600),
                         ),
                       ],
                     ),
-                    Container(width: 1, height: 30, color: Colors.teal.shade200),
+                    Container(
+                        width: 1, height: 30, color: Colors.teal.shade200),
                     Column(
                       children: [
                         Text(
@@ -1659,11 +1811,13 @@ class _DevicesPageState extends State<DevicesPage> {
                         ),
                         Text(
                           'Weekly Cost',
-                          style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                          style: TextStyle(
+                              fontSize: 10, color: Colors.grey.shade600),
                         ),
                       ],
                     ),
-                    Container(width: 1, height: 30, color: Colors.teal.shade200),
+                    Container(
+                        width: 1, height: 30, color: Colors.teal.shade200),
                     Column(
                       children: [
                         Text(
@@ -1676,7 +1830,8 @@ class _DevicesPageState extends State<DevicesPage> {
                         ),
                         Text(
                           'Devices',
-                          style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                          style: TextStyle(
+                              fontSize: 10, color: Colors.grey.shade600),
                         ),
                       ],
                     ),
@@ -1692,7 +1847,8 @@ class _DevicesPageState extends State<DevicesPage> {
                   .map((entry) {
                 final rank = entry.key + 1;
                 final device = entry.value as Map<String, dynamic>;
-                final name = device['device_name'] as String? ?? device['device_id'] as String;
+                final name = device['device_name'] as String? ??
+                    device['device_id'] as String;
                 final kwh = (device['predicted_weekly_kwh'] as num).toDouble();
                 final costLkr = (device['weekly_cost_lkr'] as num).toDouble();
                 final risk = device['risk_level'] as String? ?? 'green';
@@ -1847,8 +2003,12 @@ class _DevicesPageState extends State<DevicesPage> {
             Row(
               children: [
                 Icon(
-                  _energyVampires.isNotEmpty ? Icons.warning_amber_rounded : Icons.check_circle,
-                  color: _energyVampires.isNotEmpty ? Colors.red[700] : Colors.green[700],
+                  _energyVampires.isNotEmpty
+                      ? Icons.warning_amber_rounded
+                      : Icons.check_circle,
+                  color: _energyVampires.isNotEmpty
+                      ? Colors.red[700]
+                      : Colors.green[700],
                 ),
                 const SizedBox(width: 8),
                 const Text(
@@ -1858,7 +2018,8 @@ class _DevicesPageState extends State<DevicesPage> {
                 const Spacer(),
                 if (_vampiresLoading)
                   const SizedBox(
-                    width: 16, height: 16,
+                    width: 16,
+                    height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 else
@@ -1899,7 +2060,8 @@ class _DevicesPageState extends State<DevicesPage> {
                       Expanded(
                         child: Text(
                           'No energy vampires detected. All devices are efficient!',
-                          style: TextStyle(fontSize: 13, color: Colors.green[800]),
+                          style:
+                              TextStyle(fontSize: 13, color: Colors.green[800]),
                         ),
                       ),
                     ],
@@ -1922,11 +2084,14 @@ class _DevicesPageState extends State<DevicesPage> {
                             Text(
                               '${_energyVampires.length}',
                               style: TextStyle(
-                                fontSize: 22, fontWeight: FontWeight.bold,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
                                 color: Colors.red[700],
                               ),
                             ),
-                            Text('Vampires', style: TextStyle(fontSize: 11, color: Colors.grey[700])),
+                            Text('Vampires',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey[700])),
                           ],
                         ),
                       ),
@@ -1937,11 +2102,14 @@ class _DevicesPageState extends State<DevicesPage> {
                             Text(
                               '${_totalEnergyWaste.toStringAsFixed(2)} kWh',
                               style: TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
                                 color: Colors.orange[700],
                               ),
                             ),
-                            Text('Energy wasted (7d)', style: TextStyle(fontSize: 11, color: Colors.grey[700])),
+                            Text('Energy wasted (7d)',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey[700])),
                           ],
                         ),
                       ),
@@ -1951,12 +2119,17 @@ class _DevicesPageState extends State<DevicesPage> {
                 const SizedBox(height: 10),
                 // Individual vampire entries
                 ..._energyVampires.map((v) {
-                  final name = v['device_name'] as String? ?? v['device_id'] as String? ?? '';
-                  final idlePower = (v['avg_power_vacant'] as num?)?.toDouble() ?? 0;
+                  final name = v['device_name'] as String? ??
+                      v['device_id'] as String? ??
+                      '';
+                  final idlePower =
+                      (v['avg_power_vacant'] as num?)?.toDouble() ?? 0;
                   final ratio = (v['standby_ratio'] as num?)?.toDouble() ?? 0;
                   final severity = v['vampire_severity'] as String? ?? 'Medium';
-                  final waste = (v['energy_waste_kwh'] as num?)?.toDouble() ?? 0;
-                  final sevColor = severity == 'High' ? Colors.red : Colors.orange;
+                  final waste =
+                      (v['energy_waste_kwh'] as num?)?.toDouble() ?? 0;
+                  final sevColor =
+                      severity == 'High' ? Colors.red : Colors.orange;
 
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
@@ -1974,26 +2147,34 @@ class _DevicesPageState extends State<DevicesPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                              Text(name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13)),
                               const SizedBox(height: 2),
                               Text(
                                 'Idle: ${idlePower.toStringAsFixed(1)}W  |  '
                                 'Standby: ${(ratio * 100).toStringAsFixed(0)}%  |  '
                                 'Waste: ${waste.toStringAsFixed(2)} kWh',
-                                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey[600]),
                               ),
                             ],
                           ),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: sevColor.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
                             severity,
-                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: sevColor),
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: sevColor),
                           ),
                         ),
                       ],
@@ -2012,7 +2193,8 @@ class _DevicesPageState extends State<DevicesPage> {
     final profile = _deviceProfiles[deviceId];
     if (profile == null) return const SizedBox.shrink();
 
-    final avgOccupied = (profile['avg_power_occupied'] as num?)?.toDouble() ?? 0;
+    final avgOccupied =
+        (profile['avg_power_occupied'] as num?)?.toDouble() ?? 0;
     final avgVacant = (profile['avg_power_vacant'] as num?)?.toDouble() ?? 0;
     final standbyRatio = (profile['standby_ratio'] as num?)?.toDouble() ?? 0;
     final wasteKwh = (profile['energy_waste_kwh'] as num?)?.toDouble() ?? 0;
@@ -2045,7 +2227,10 @@ class _DevicesPageState extends State<DevicesPage> {
                 ),
                 child: Text(
                   'Energy Vampire ($severity)',
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.red[700]),
+                  style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red[700]),
                 ),
               ),
             ],
@@ -2083,7 +2268,9 @@ class _DevicesPageState extends State<DevicesPage> {
                 'Standby Ratio',
                 '${(standbyRatio * 100).toStringAsFixed(1)}%',
                 Icons.battery_alert,
-                standbyRatio > 0.3 ? Colors.red : (standbyRatio > 0.1 ? Colors.orange : Colors.green),
+                standbyRatio > 0.3
+                    ? Colors.red
+                    : (standbyRatio > 0.1 ? Colors.orange : Colors.green),
               ),
             ),
             const SizedBox(width: 12),
@@ -2109,7 +2296,10 @@ class _DevicesPageState extends State<DevicesPage> {
           const SizedBox(height: 16),
           Text(
             'Hourly Power Profile (24h)',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey[800]),
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey[800]),
           ),
           const SizedBox(height: 8),
           _buildHourlyChart(hourlyProfile),
@@ -2118,7 +2308,8 @@ class _DevicesPageState extends State<DevicesPage> {
     );
   }
 
-  Widget _buildProfileStat(String label, String value, IconData icon, Color color) {
+  Widget _buildProfileStat(
+      String label, String value, IconData icon, Color color) {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
@@ -2134,8 +2325,13 @@ class _DevicesPageState extends State<DevicesPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: color)),
-                Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                Text(value,
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: color)),
+                Text(label,
+                    style: TextStyle(fontSize: 10, color: Colors.grey[600])),
               ],
             ),
           ),
@@ -2193,8 +2389,10 @@ class _DevicesPageState extends State<DevicesPage> {
                 ),
               ),
             ),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles:
+                const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           ),
           borderData: FlBorderData(show: false),
           minX: 0,
@@ -2228,8 +2426,9 @@ class _DevicesPageState extends State<DevicesPage> {
     final readings = _deviceReadings[deviceId] ?? [];
     final faults = _deviceFaults[deviceId] ?? [];
     final hasReadings = readings.isNotEmpty;
+    final latestReading = hasReadings ? readings.first : null;
 
-    // Check if device is active (last reading within 60 seconds)
+    // Check if device is active (last reading < 5 seconds)
     final lastReadingTime = _deviceLastReadings[deviceId];
     final isActive = lastReadingTime != null &&
         DateTime.now().difference(lastReadingTime).inSeconds < 10;
@@ -2353,7 +2552,8 @@ class _DevicesPageState extends State<DevicesPage> {
                             if (isActive) ...[
                               const SizedBox(width: 6),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: Colors.green.withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(8),
@@ -2361,7 +2561,8 @@ class _DevicesPageState extends State<DevicesPage> {
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.circle, size: 6, color: Colors.green),
+                                    Icon(Icons.circle,
+                                        size: 6, color: Colors.green),
                                     const SizedBox(width: 4),
                                     Text(
                                       'Active',
@@ -2391,7 +2592,8 @@ class _DevicesPageState extends State<DevicesPage> {
                           const SizedBox(height: 2),
                           Row(
                             children: [
-                              Icon(Icons.insights, size: 12, color: Colors.blue[300]),
+                              Icon(Icons.insights,
+                                  size: 12, color: Colors.blue[300]),
                               const SizedBox(width: 4),
                               Text(
                                 'Insights ready',
@@ -2418,13 +2620,16 @@ class _DevicesPageState extends State<DevicesPage> {
                   const SizedBox(width: 8),
                   Icon(
                     isExpanded ? Icons.expand_less : Icons.expand_more,
-                    color: Colors.grey[600],
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.6),
                   ),
                 ],
               ),
             ),
-            // Expanded content
-            if (isExpanded) _buildExpandedContent(deviceId, device, readings, faults),
+            if (isExpanded)
+              _buildExpandedContent(deviceId, device, readings, faults),
           ],
         ),
       ),
@@ -2528,9 +2733,12 @@ class _DevicesPageState extends State<DevicesPage> {
                   Expanded(
                     child: SegmentedButton<TimeRange>(
                       segments: const [
-                        ButtonSegment(value: TimeRange.hours6, label: Text('6h')),
-                        ButtonSegment(value: TimeRange.hours24, label: Text('24h')),
-                        ButtonSegment(value: TimeRange.days7, label: Text('7d')),
+                        ButtonSegment(
+                            value: TimeRange.hours6, label: Text('6h')),
+                        ButtonSegment(
+                            value: TimeRange.hours24, label: Text('24h')),
+                        ButtonSegment(
+                            value: TimeRange.days7, label: Text('7d')),
                       ],
                       selected: {timeRange},
                       onSelectionChanged: (Set<TimeRange> selected) {
@@ -2556,13 +2764,21 @@ class _DevicesPageState extends State<DevicesPage> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Row(
                     children: [
-                      Icon(Icons.access_time, size: 14, color: Colors.grey[600]),
+                      Icon(Icons.access_time,
+                          size: 14,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(0.6)),
                       const SizedBox(width: 4),
                       Text(
                         'Last refreshed: ${_formatTime(lastUpdated)}',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.grey[600],
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(0.6),
                         ),
                       ),
                       if (isLoading) ...[
@@ -2589,24 +2805,28 @@ class _DevicesPageState extends State<DevicesPage> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.error_outline, color: Colors.red[700], size: 20),
+                      Icon(Icons.error_outline,
+                          color: Colors.red[700], size: 20),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           error,
-                          style: TextStyle(color: Colors.red[700], fontSize: 12),
+                          style:
+                              TextStyle(color: Colors.red[700], fontSize: 12),
                         ),
                       ),
                       TextButton(
                         onPressed: () => _loadDeviceReadings(deviceId),
-                        child: const Text('Retry', style: TextStyle(fontSize: 12)),
+                        child:
+                            const Text('Retry', style: TextStyle(fontSize: 12)),
                       ),
                     ],
                   ),
                 ),
 
               // Fault Detection Section
-              if (activeFaults.isNotEmpty) _buildFaultSection(deviceId, activeFaults, faults),
+              if (activeFaults.isNotEmpty)
+                _buildFaultSection(deviceId, activeFaults, faults),
 
               // 24h Insights
               if (readings.isEmpty && !isLoading && error == null)
@@ -2615,11 +2835,16 @@ class _DevicesPageState extends State<DevicesPage> {
                   child: Center(
                     child: Column(
                       children: [
-                        Icon(Icons.data_usage, size: 48, color: Colors.grey[400]),
+                        Icon(Icons.data_usage,
+                            size: 48, color: Colors.grey[400]),
                         const SizedBox(height: 8),
                         Text(
                           'No data in last ${_getHoursForRange(timeRange)}h',
-                          style: TextStyle(color: Colors.grey[600]),
+                          style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withOpacity(0.6)),
                         ),
                         const SizedBox(height: 8),
                         TextButton(
@@ -2641,7 +2866,8 @@ class _DevicesPageState extends State<DevicesPage> {
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: OutlinedButton.icon(
-                    onPressed: () => _showFaultHistory(deviceId, device['device_name'] as String? ?? deviceId),
+                    onPressed: () => _showFaultHistory(
+                        deviceId, device['device_name'] as String? ?? deviceId),
                     icon: const Icon(Icons.history, size: 18),
                     label: Text('View Fault History (${faults.length})'),
                     style: OutlinedButton.styleFrom(
@@ -2656,10 +2882,13 @@ class _DevicesPageState extends State<DevicesPage> {
     );
   }
 
-  Widget _buildFaultSection(String deviceId, List<dynamic> activeFaults, List<dynamic> allFaults) {
-    final criticalCount = activeFaults.where((f) => f['severity'] == 'Critical').length;
+  Widget _buildFaultSection(
+      String deviceId, List<dynamic> activeFaults, List<dynamic> allFaults) {
+    final criticalCount =
+        activeFaults.where((f) => f['severity'] == 'Critical').length;
     final highCount = activeFaults.where((f) => f['severity'] == 'High').length;
-    final mediumCount = activeFaults.where((f) => f['severity'] == 'Medium').length;
+    final mediumCount =
+        activeFaults.where((f) => f['severity'] == 'Medium').length;
     final lowCount = activeFaults.where((f) => f['severity'] == 'Low').length;
 
     // Get latest fault
@@ -2719,14 +2948,16 @@ class _DevicesPageState extends State<DevicesPage> {
                 _buildFaultBadge('High: $highCount', Colors.orange),
               if (mediumCount > 0)
                 _buildFaultBadge('Medium: $mediumCount', Colors.amber),
-              if (lowCount > 0)
-                _buildFaultBadge('Low: $lowCount', Colors.blue),
+              if (lowCount > 0) _buildFaultBadge('Low: $lowCount', Colors.blue),
             ],
           ),
           const SizedBox(height: 8),
           Text(
             'Suggested: Check device connections and review fault history for details.',
-            style: TextStyle(fontSize: 11, color: Colors.grey[700], fontStyle: FontStyle.italic),
+            style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey[700],
+                fontStyle: FontStyle.italic),
           ),
         ],
       ),
@@ -2743,12 +2974,14 @@ class _DevicesPageState extends State<DevicesPage> {
       ),
       child: Text(
         text,
-        style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
+        style:
+            TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
       ),
     );
   }
 
-  Widget _buildInsightsSection(List<EnergyReading> readings, TimeRange timeRange) {
+  Widget _buildInsightsSection(
+      List<EnergyReading> readings, TimeRange timeRange) {
     if (readings.isEmpty) return const SizedBox.shrink();
 
     // Calculate statistics
@@ -2768,7 +3001,7 @@ class _DevicesPageState extends State<DevicesPage> {
     // Sort readings chronologically (oldest first) for accurate calculation
     final sortedReadings = List<EnergyReading>.from(readings)
       ..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
-    
+
     double totalUsageKwh = 0.0;
     if (sortedReadings.length > 1) {
       // Calculate energy for each time interval between consecutive readings
@@ -2776,26 +3009,26 @@ class _DevicesPageState extends State<DevicesPage> {
       for (int i = 0; i < sortedReadings.length - 1; i++) {
         final reading1 = sortedReadings[i];
         final reading2 = sortedReadings[i + 1];
-        
+
         // Calculate power at each reading point
         final power1Kw = (reading1.currentA * standardVoltage) / 1000;
         final power2Kw = (reading2.currentA * standardVoltage) / 1000;
         final avgPowerKw = (power1Kw + power2Kw) / 2.0;
-        
+
         // Calculate time interval in hours
         final timeDiff = reading2.receivedAt.difference(reading1.receivedAt);
         final hoursInterval = timeDiff.inSeconds / 3600.0;
-        
+
         // Energy = Average Power × Time Interval
         totalUsageKwh += avgPowerKw * hoursInterval;
       }
-      
+
       // For the last reading, calculate energy from last reading to end of time range
       // or to now if the last reading is recent (within 1 hour)
       final lastReading = sortedReadings.last;
       final now = DateTime.now();
       final timeSinceLastReading = now.difference(lastReading.receivedAt);
-      
+
       // Only extrapolate if last reading is recent (within 1 hour)
       // Otherwise, use the last reading's power for the average interval period
       if (timeSinceLastReading.inHours < 1) {
@@ -2807,8 +3040,8 @@ class _DevicesPageState extends State<DevicesPage> {
         // Old reading: use average interval between readings
         if (sortedReadings.length >= 2) {
           final totalTimeSpan = sortedReadings.last.receivedAt
-              .difference(sortedReadings.first.receivedAt)
-              .inSeconds /
+                  .difference(sortedReadings.first.receivedAt)
+                  .inSeconds /
               3600.0;
           final avgInterval = totalTimeSpan / (sortedReadings.length - 1);
           final lastPowerKw = (lastReading.currentA * standardVoltage) / 1000;
@@ -2820,7 +3053,7 @@ class _DevicesPageState extends State<DevicesPage> {
       final reading = sortedReadings.first;
       final now = DateTime.now();
       final timeSinceReading = now.difference(reading.receivedAt);
-      
+
       final powerKw = (reading.currentA * standardVoltage) / 1000;
       final hoursInterval = timeSinceReading.inHours < 1
           ? timeSinceReading.inSeconds / 3600.0
@@ -2829,8 +3062,10 @@ class _DevicesPageState extends State<DevicesPage> {
     }
 
     // Calculate uptime/coverage
-    final expectedReadings = _getHoursForRange(timeRange) * 3600; // Assuming 1 reading per second
-    final coverage = (readings.length / expectedReadings * 100).clamp(0.0, 100.0);
+    final expectedReadings =
+        _getHoursForRange(timeRange) * 3600; // Assuming 1 reading per second
+    final coverage =
+        (readings.length / expectedReadings * 100).clamp(0.0, 100.0);
 
     final latestReading = readings.first;
 
@@ -2874,9 +3109,14 @@ class _DevicesPageState extends State<DevicesPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildPowerStat('Max', '${maxPowerKw.toStringAsFixed(3)} kW', Colors.red),
-                    _buildPowerStat('Avg', '${avgPowerKw.toStringAsFixed(3)} kW', Colors.blue),
-                    _buildPowerStat('Total Usage', '${totalUsageKwh.toStringAsFixed(3)} kWh', Colors.orange),
+                    _buildPowerStat('Max',
+                        '${maxPowerKw.toStringAsFixed(3)} kW', Colors.red),
+                    _buildPowerStat('Avg',
+                        '${avgPowerKw.toStringAsFixed(3)} kW', Colors.blue),
+                    _buildPowerStat(
+                        'Total Usage',
+                        '${totalUsageKwh.toStringAsFixed(3)} kWh',
+                        Colors.orange),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -2884,7 +3124,13 @@ class _DevicesPageState extends State<DevicesPage> {
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
                     'Calculated at ${standardVoltage}V standard voltage',
-                    style: TextStyle(fontSize: 10, color: Colors.grey[600], fontStyle: FontStyle.italic),
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.6),
+                        fontStyle: FontStyle.italic),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -2901,16 +3147,22 @@ class _DevicesPageState extends State<DevicesPage> {
           mainAxisSpacing: 12,
           childAspectRatio: 2.2,
           children: [
-            _buildStatCard('Min Current', '${minCurrent.toStringAsFixed(3)} A', Icons.trending_down),
-            _buildStatCard('Max Current', '${maxCurrent.toStringAsFixed(3)} A', Icons.trending_up),
-            _buildStatCard('Avg Current', '${avgCurrent.toStringAsFixed(3)} A', Icons.show_chart),
+            _buildStatCard('Min Current', '${minCurrent.toStringAsFixed(3)} A',
+                Icons.trending_down),
+            _buildStatCard('Max Current', '${maxCurrent.toStringAsFixed(3)} A',
+                Icons.trending_up),
+            _buildStatCard('Avg Current', '${avgCurrent.toStringAsFixed(3)} A',
+                Icons.show_chart),
             _buildStatCard('Samples', '${readings.length}', Icons.data_usage),
-            _buildStatCard('Coverage', '${coverage.toStringAsFixed(1)}%', Icons.signal_cellular_alt),
-            _buildStatCard('Latest', _formatTime(latestReading.receivedAt.toLocal()), Icons.access_time),
+            _buildStatCard('Coverage', '${coverage.toStringAsFixed(1)}%',
+                Icons.signal_cellular_alt),
+            _buildStatCard(
+                'Latest',
+                _formatTime(latestReading.receivedAt.toLocal()),
+                Icons.access_time),
           ],
         ),
         const SizedBox(height: 16),
-        
       ],
     );
   }
@@ -2920,7 +3172,10 @@ class _DevicesPageState extends State<DevicesPage> {
       children: [
         Text(
           label,
-          style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.w500),
+          style: TextStyle(
+              fontSize: 11,
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+              fontWeight: FontWeight.w500),
         ),
         const SizedBox(height: 4),
         Text(
@@ -2968,7 +3223,6 @@ class _DevicesPageState extends State<DevicesPage> {
     );
   }
 
-
   Widget _buildSparkline(List<EnergyReading> readings) {
     // Sample readings for sparkline (max 100 points)
     final sampleSize = readings.length > 100 ? 100 : readings.length;
@@ -2981,8 +3235,10 @@ class _DevicesPageState extends State<DevicesPage> {
     final displayReadings = sampledReadings.reversed.toList();
     if (displayReadings.isEmpty) return const SizedBox.shrink();
 
-    final maxCurrent = displayReadings.map((r) => r.currentA).reduce((a, b) => a > b ? a : b);
-    final minCurrent = displayReadings.map((r) => r.currentA).reduce((a, b) => a < b ? a : b);
+    final maxCurrent =
+        displayReadings.map((r) => r.currentA).reduce((a, b) => a > b ? a : b);
+    final minCurrent =
+        displayReadings.map((r) => r.currentA).reduce((a, b) => a < b ? a : b);
     final range = (maxCurrent - minCurrent).abs();
     final padding = range * 0.1;
 
@@ -2999,7 +3255,7 @@ class _DevicesPageState extends State<DevicesPage> {
       height: 100,
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: Theme.of(context).colorScheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(8),
       ),
       child: LineChart(
@@ -3011,12 +3267,12 @@ class _DevicesPageState extends State<DevicesPage> {
             LineChartBarData(
               spots: spots,
               isCurved: true,
-              color: Colors.green,
+              color: Theme.of(context).colorScheme.primary,
               barWidth: 2,
               dotData: const FlDotData(show: false),
               belowBarData: BarAreaData(
                 show: true,
-                color: Colors.green.withOpacity(0.1),
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
               ),
             ),
           ],
@@ -3045,7 +3301,9 @@ class _DevicesPageState extends State<DevicesPage> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
+                border: Border(
+                    bottom: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant)),
               ),
               child: Row(
                 children: [
@@ -3056,7 +3314,12 @@ class _DevicesPageState extends State<DevicesPage> {
                   const Spacer(),
                   Text(
                     deviceName,
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                    style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.6)),
                   ),
                   const SizedBox(width: 8),
                   IconButton(
@@ -3072,11 +3335,16 @@ class _DevicesPageState extends State<DevicesPage> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.check_circle_outline, size: 64, color: Colors.green[300]),
+                          Icon(Icons.check_circle_outline,
+                              size: 64, color: Colors.green[300]),
                           const SizedBox(height: 16),
                           Text(
                             'No faults recorded',
-                            style: TextStyle(color: Colors.grey[600]),
+                            style: TextStyle(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withOpacity(0.6)),
                           ),
                         ],
                       ),
@@ -3116,33 +3384,44 @@ class _DevicesPageState extends State<DevicesPage> {
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Icon(
-                                status == 'active' ? Icons.warning : Icons.check_circle,
+                                status == 'active'
+                                    ? Icons.warning
+                                    : Icons.check_circle,
                                 color: severityColor,
                                 size: 24,
                               ),
                             ),
                             title: Text(
                               fault['issue'] as String? ?? 'Unknown issue',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const SizedBox(height: 4),
-                                Text('Severity: $severity • Status: ${status.toUpperCase()}'),
-                                Text('Detected: ${_formatTime(detectedAt.toLocal())}'),
+                                Text(
+                                    'Severity: $severity • Status: ${status.toUpperCase()}'),
+                                Text(
+                                    'Detected: ${_formatTime(detectedAt.toLocal())}'),
                                 if (fault['description'] != null)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 4),
                                     child: Text(
                                       fault['description'] as String,
-                                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurface
+                                              .withOpacity(0.6)),
                                     ),
                                   ),
                               ],
                             ),
                             trailing: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
                                 color: severityColor.withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(12),
@@ -3333,9 +3612,7 @@ class _DevicesPageState extends State<DevicesPage> {
           ),
           actions: [
             TextButton(
-              onPressed: isSubmitting
-                  ? null
-                  : () => Navigator.pop(context),
+              onPressed: isSubmitting ? null : () => Navigator.pop(context),
               child: const Text('Cancel'),
             ),
             ElevatedButton(
@@ -3353,15 +3630,18 @@ class _DevicesPageState extends State<DevicesPage> {
                             'device_name': deviceNameController.text.trim(),
                             'device_type': deviceTypeController.text.trim(),
                             'location': locationController.text.trim(),
-                            'rated_power_watts': int.parse(ratedPowerController.text.trim()),
+                            'rated_power_watts':
+                                int.parse(ratedPowerController.text.trim()),
                           };
 
                           if (moduleIdController.text.trim().isNotEmpty) {
-                            deviceData['module_id'] = moduleIdController.text.trim();
+                            deviceData['module_id'] =
+                                moduleIdController.text.trim();
                           }
 
                           if (installedDateController.text.trim().isNotEmpty) {
-                            deviceData['installed_date'] = installedDateController.text.trim();
+                            deviceData['installed_date'] =
+                                installedDateController.text.trim();
                           }
 
                           await _deviceService.addDevice(deviceData);
