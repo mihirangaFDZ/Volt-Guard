@@ -4,6 +4,7 @@ import 'devices_page.dart';
 import 'analytics_page.dart';
 import 'profile_page.dart';
 import 'zones_page.dart';
+import '../services/ml_training_manager.dart';
 
 /// Main page with bottom navigation bar for app navigation
 class MainPage extends StatefulWidget {
@@ -23,6 +24,14 @@ class _MainPageState extends State<MainPage> {
     const AnalyticsPage(),
     const ProfilePage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Trigger ML model training once at app startup.
+    // The singleton ensures this only fires once, even if MainPage is rebuilt.
+    MLTrainingManager.instance.ensureModelTrained();
+  }
 
   @override
   Widget build(BuildContext context) {
