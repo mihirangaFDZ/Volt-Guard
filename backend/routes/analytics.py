@@ -18,6 +18,9 @@ router = APIRouter(
 # Sri Lankan timezone (UTC+5:30)
 SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
 
+# Threshold for considering sensor as "turned off" (1 hour)
+SENSOR_OFFLINE_THRESHOLD_MINUTES = 60
+
 
 @router.get("/filters")
 def get_available_filters():
@@ -46,6 +49,8 @@ def get_occupancy_stats(limit: int = 50, module: Optional[str] = None, location:
     """
     Get occupancy statistics from occupancy_telemetry table.
     Returns statistics about occupied vs vacant periods.
+    If the latest reading is older than threshold, sensor is considered "turned off"
+    and values are set to 0 with vacant occupancy.
     """
     query = {}
     if module:
@@ -76,13 +81,25 @@ def get_occupancy_stats(limit: int = 50, module: Optional[str] = None, location:
             "is_currently_occupied": False,
         }
 
-    # Count occupied and vacant readings
+    # Check if latest reading indicates sensor is turned off
+    latest = docs[0]
+    latest_ts = latest.get("received_at") or latest.get("receivedAt") or latest.get("timestamp")
+    latest_time = _to_datetime(latest_ts) if latest_ts else None
+    
+    sensor_turned_off = _is_sensor_turned_off(latest_time) if latest_time else True
+    
+    # If sensor is turned off, modify the latest reading to show 0 values and vacant
+    if sensor_turned_off:
+        latest = dict(latest)  # Create a copy to avoid modifying original
+        _set_reading_to_offline(latest)
+        docs[0] = latest
+
+    # Count occupied and vacant readings (after potential modification)
     occupied_count = sum(1 for d in docs if d.get("pir") == 1 or d.get("rcwl") == 1)
     vacant_count = len(docs) - occupied_count
     total_readings = len(docs)
     
     # Latest reading to determine current status
-    latest = docs[0]
     is_currently_occupied = latest.get("pir") == 1 or latest.get("rcwl") == 1
 
     return {
@@ -97,6 +114,11 @@ def get_occupancy_stats(limit: int = 50, module: Optional[str] = None, location:
 
 @router.get("/latest")
 def get_latest_readings(limit: int = 50, module: Optional[str] = None, location: Optional[str] = None):
+    """
+    Get latest sensor readings.
+    If the latest reading is older than threshold, sensor is considered "turned off"
+    and values are set to 0 with vacant occupancy.
+    """
     query = {}
     if module:
         query["module"] = module
@@ -116,7 +138,22 @@ def get_latest_readings(limit: int = 50, module: Optional[str] = None, location:
     )   
 
     normalized = []
-    for doc in cursor:
+    docs_list = list(cursor)
+    
+    # Check if the latest reading (first in sorted list) indicates sensor is turned off
+    if docs_list:
+        latest = docs_list[0]
+        latest_ts = latest.get("received_at") or latest.get("receivedAt") or latest.get("timestamp")
+        latest_time = _to_datetime(latest_ts) if latest_ts else None
+        sensor_turned_off = _is_sensor_turned_off(latest_time) if latest_time else True
+        
+        if sensor_turned_off:
+            # Create a copy and modify it
+            latest = dict(latest)
+            _set_reading_to_offline(latest)
+            docs_list[0] = latest
+    
+    for doc in docs_list:
         ts = doc.get("received_at") or doc.get("receivedAt") or doc.get("timestamp")
         if ts is not None:
             dt = _to_datetime(ts)
@@ -145,6 +182,30 @@ def _to_datetime(value):
     
     # Convert to Sri Lankan time
     return dt.astimezone(SRI_LANKA_TZ)
+
+
+def _is_sensor_turned_off(reading_time: datetime) -> bool:
+    """
+    Check if sensor is turned off based on reading timestamp.
+    Sensor is considered "turned off" if the reading is older than threshold.
+    """
+    if reading_time is None:
+        return True
+    
+    now = datetime.now(SRI_LANKA_TZ)
+    time_diff = (now - reading_time).total_seconds() / 60  # Convert to minutes
+    return time_diff > SENSOR_OFFLINE_THRESHOLD_MINUTES
+
+
+def _set_reading_to_offline(doc: dict):
+    """
+    Set sensor reading values to 0 and occupancy to vacant when sensor is turned off.
+    """
+    doc["temperature"] = 0.0
+    doc["humidity"] = 0.0
+    doc["pir"] = 0
+    doc["rcwl"] = 0
+    return doc
 
 
 def _derive_recommendations(docs: List[dict]) -> List[Recommendation]:
