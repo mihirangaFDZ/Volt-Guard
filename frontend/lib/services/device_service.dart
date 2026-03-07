@@ -78,5 +78,31 @@ class DeviceService {
       throw Exception('Device API failed (${resp.statusCode}): ${resp.body}');
     }
   }
+
+  /// Update relay state for a device
+  Future<Map<String, dynamic>> updateRelayState(String deviceId, bool isOn) async {
+    final headers = await _authService.getAuthHeaders();
+    headers['Content-Type'] = 'application/json';
+    headers['Accept'] = 'application/json';
+    final uri = Uri.parse('${ApiConfig.baseUrl}${ApiConfig.devicesEndpoint}/$deviceId/relay');
+    final resp = await http.put(
+      uri,
+      headers: headers,
+      body: jsonEncode({'relay_state': isOn ? 'ON' : 'OFF'}),
+    ).timeout(ApiConfig.requestTimeout);
+    _ensureOk(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// Get current relay state for a device
+  Future<String> getRelayState(String deviceId) async {
+    final headers = await _authService.getAuthHeaders();
+    headers['Accept'] = 'application/json';
+    final uri = Uri.parse('${ApiConfig.baseUrl}${ApiConfig.devicesEndpoint}/$deviceId/relay');
+    final resp = await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
+    _ensureOk(resp);
+    final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    return data['relay_state'] as String? ?? 'OFF';
+  }
 }
 
