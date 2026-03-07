@@ -1,0 +1,25 @@
+{
+  "rmse": 0.0243,
+  "mae": 0.0144,
+  "r2": 0.6781,
+  "train_size": 3297,
+  "test_size": 825,
+  "baseline_rmse_last_value": 0.027,
+  "baseline_rmse_rolling": 0.0437,
+  "improvement_vs_best_baseline_pct": 9.99,
+  "ci_90_lower_offset_w": -0.0401,
+  "ci_90_upper_offset_w": 0.0399,
+  "epochs_trained": 43,
+  "sequence_length": 48,
+  "feature_columns": [
+    "current_a",
+    "power_w",
+    "hour_sin",
+    "hour_cos",
+    "day_sin",
+    "day_cos",
+    "is_weekend"
+  ],
+  "split_method": "chronological_80_20",
+  "trained_at": "2026-03-07T21:24:41.624595+00:00"
+}

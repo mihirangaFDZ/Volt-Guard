@@ -7,6 +7,7 @@ import '../services/behavioral_profile_service.dart';
 import '../services/prediction_service.dart';
 import '../services/anomaly_alert_service.dart';
 import '../services/ml_training_manager.dart';
+import '../services/model_evaluation_service.dart';
 import '../models/energy_reading.dart';
 
 /// Devices page showing connected IoT devices with 24h insights and fault detection
@@ -75,11 +76,21 @@ class _DevicesPageState extends State<DevicesPage> {
   bool _anomalyLoading = false;
   String? _anomalyError;
 
+  // Research metrics state
+  final ModelEvaluationService _evalService = ModelEvaluationService();
+  Map<String, dynamic>? _modelComparison;
+  Map<String, dynamic>? _anomalyMetrics;
+  Map<String, dynamic>? _dataQuality;
+  bool _researchMetricsLoading = false;
+  String? _researchMetricsError;
+  bool _researchMetricsExpanded = false;
+
   @override
   void initState() {
     super.initState();
     _loadDevices();
     _loadEnergyVampires();
+    _loadResearchMetrics();
   }
 
   Future<void> _loadDevices() async {
@@ -234,6 +245,34 @@ class _DevicesPageState extends State<DevicesPage> {
     }
   }
 
+  Future<void> _loadResearchMetrics() async {
+    if (!mounted) return;
+    setState(() {
+      _researchMetricsLoading = true;
+      _researchMetricsError = null;
+    });
+    try {
+      final results = await Future.wait([
+        _evalService.fetchModelComparison(),
+        _evalService.fetchAnomalyMetrics(),
+        _evalService.fetchDataQuality(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _modelComparison = results[0];
+        _anomalyMetrics = results[1];
+        _dataQuality = results[2];
+        _researchMetricsLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _researchMetricsError = 'Unable to load model metrics: $e';
+        _researchMetricsLoading = false;
+      });
+    }
+  }
+
   Future<void> _loadDeviceProfile(String deviceId) async {
     if (_deviceProfiles.containsKey(deviceId)) return;
     try {
@@ -327,8 +366,8 @@ class _DevicesPageState extends State<DevicesPage> {
             final timeDiff = now.difference(lastReading.receivedAt);
             _deviceLastReadings[deviceId] = lastReading.receivedAt;
 
-            // Active if last reading is within the last hour (matches fetch window)
-            if (timeDiff.inMinutes < 60) {
+            // Active if last reading is within the last 10 seconds
+            if (timeDiff.inSeconds < 10) {
               activeCount++;
             }
           }
@@ -481,7 +520,7 @@ class _DevicesPageState extends State<DevicesPage> {
     for (final device in _devices) {
       final deviceId = device['device_id'] as String? ?? '';
       final lastReading = _deviceLastReadings[deviceId];
-      if (lastReading != null && now.difference(lastReading).inMinutes < 60) {
+      if (lastReading != null && now.difference(lastReading).inSeconds < 10) {
         activeCount++;
       }
     }
@@ -774,6 +813,8 @@ class _DevicesPageState extends State<DevicesPage> {
         // Summary Statistics Card
         _buildSummaryCard(),
         const SizedBox(height: 16),
+        _buildResearchMetricsPanel(),
+        const SizedBox(height: 16),
         _buildEnergyForecastPanel(),
         const SizedBox(height: 16),
         _buildDeviceComparisonCard(),
@@ -782,6 +823,324 @@ class _DevicesPageState extends State<DevicesPage> {
         const SizedBox(height: 16),
         ..._devices.map((device) => _buildDeviceCard(device)),
       ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Research Metrics Panel
+  // ---------------------------------------------------------------------------
+
+  Widget _buildResearchMetricsPanel() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Header color for research card
+    final accentColor = isDark ? const Color(0xFF7C4DFF) : const Color(0xFF6200EE);
+
+    if (_researchMetricsLoading) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(children: [
+            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 12),
+            Text('Loading AI model metrics...', style: TextStyle(color: colorScheme.onSurface.withOpacity(0.6))),
+          ]),
+        ),
+      );
+    }
+
+    if (_researchMetricsError != null && _modelComparison == null) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(children: [
+            Icon(Icons.info_outline, color: Colors.orange[700], size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Model metrics unavailable — retrain the LSTM to generate evaluation data.',
+                style: TextStyle(fontSize: 12, color: colorScheme.onSurface.withOpacity(0.7)),
+              ),
+            ),
+          ]),
+        ),
+      );
+    }
+
+    final isMissing = _modelComparison == null || _modelComparison!['status'] == 'not_evaluated';
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Title row
+            Row(
+              children: [
+                Icon(Icons.analytics, color: accentColor, size: 22),
+                const SizedBox(width: 8),
+                Text(
+                  'AI Model Performance',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: colorScheme.onSurface),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: accentColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text('Research Metrics', style: TextStyle(fontSize: 10, color: accentColor, fontWeight: FontWeight.w600)),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: Icon(_researchMetricsExpanded ? Icons.expand_less : Icons.expand_more, size: 20),
+                  onPressed: () => setState(() => _researchMetricsExpanded = !_researchMetricsExpanded),
+                  tooltip: 'Toggle details',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            if (isMissing) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                ),
+                child: Row(children: [
+                  Icon(Icons.warning_amber, color: Colors.orange[700], size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(
+                    'Retrain the LSTM model to generate evaluation metrics. '
+                    'Trigger POST /ml-training/train-all.',
+                    style: TextStyle(fontSize: 12, color: colorScheme.onSurface.withOpacity(0.8)),
+                  )),
+                ]),
+              ),
+            ] else ...[
+              // --- Section A: LSTM Metrics ---
+              _buildMetricsSectionA(colorScheme),
+
+              if (_researchMetricsExpanded) ...[
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                // --- Section B: Baseline Comparison ---
+                _buildMetricsSectionB(colorScheme, accentColor),
+
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                // --- Section C: Anomaly Detection ---
+                _buildMetricsSectionC(colorScheme),
+
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                // --- Section D: Data Quality ---
+                _buildMetricsSectionD(colorScheme),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMetricsSectionA(ColorScheme cs) {
+    final comp = _modelComparison;
+    if (comp == null || comp['comparison'] == null) return const SizedBox();
+    final lstm = (comp['comparison'] as List).firstWhere(
+      (c) => (c as Map)['highlight'] == true, orElse: () => null);
+    if (lstm == null) return const SizedBox();
+    final rmse = (lstm['rmse_w'] as num?)?.toDouble();
+
+    // Fetch MAE and R² from lstm metrics if available (model comparison doesn't carry them)
+    // We'll display what we have
+    Color rmseColor = Colors.grey;
+    if (rmse != null) {
+      rmseColor = rmse < 5 ? Colors.green : (rmse < 20 ? Colors.orange : Colors.red);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('LSTM Prediction Model', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.7))),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _metricChip('RMSE', rmse != null ? '${rmse.toStringAsFixed(2)} W' : 'N/A', rmseColor),
+            const SizedBox(width: 8),
+            if (comp['improvement_vs_best_baseline_pct'] != null)
+              _metricChip(
+                'vs Baseline',
+                '+${(comp['improvement_vs_best_baseline_pct'] as num).toStringAsFixed(1)}%',
+                Colors.green,
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Split: 80% train / 20% test (chronological)',
+          style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMetricsSectionB(ColorScheme cs, Color accent) {
+    final comp = _modelComparison;
+    if (comp == null || comp['comparison'] == null) return const SizedBox();
+    final rows = comp['comparison'] as List;
+    final improvement = comp['improvement_vs_best_baseline_pct'];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Baseline Comparison (RMSE)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.7))),
+        const SizedBox(height: 8),
+        ...rows.map((r) {
+          final m = r as Map;
+          final isHighlight = m['highlight'] == true;
+          final rmseVal = (m['rmse_w'] as num?)?.toDouble();
+          return Container(
+            margin: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: isHighlight ? accent.withOpacity(0.10) : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+              border: isHighlight ? Border.all(color: accent.withOpacity(0.4)) : null,
+            ),
+            child: Row(children: [
+              if (isHighlight) Icon(Icons.star, size: 12, color: accent),
+              if (isHighlight) const SizedBox(width: 4),
+              Expanded(child: Text(m['model'] as String, style: TextStyle(fontSize: 12, fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal))),
+              Text(rmseVal != null ? '${rmseVal.toStringAsFixed(2)} W' : 'N/A',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isHighlight ? accent : cs.onSurface)),
+            ]),
+          );
+        }),
+        if (improvement != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            'LSTM is ${(improvement as num).toStringAsFixed(1)}% more accurate than the best baseline.',
+            style: TextStyle(fontSize: 11, color: Colors.green[700], fontWeight: FontWeight.w600),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildMetricsSectionC(ColorScheme cs) {
+    final anomaly = _anomalyMetrics;
+    if (anomaly == null) return const SizedBox();
+
+    if (anomaly['status'] == 'not_evaluated') {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Anomaly Detection', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.7))),
+          const SizedBox(height: 6),
+          Text('Run backend/scripts/evaluate_anomaly_detection.py to compute precision/recall.',
+            style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5))),
+        ],
+      );
+    }
+
+    Widget modelRow(String name, Map<String, dynamic> m) {
+      final p = (m['precision'] as num?)?.toDouble();
+      final r = (m['recall'] as num?)?.toDouble();
+      final f = (m['f1'] as num?)?.toDouble();
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(name, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.8))),
+          const SizedBox(height: 4),
+          Row(children: [
+            _metricChip('P', p != null ? p.toStringAsFixed(2) : 'N/A', Colors.blue),
+            const SizedBox(width: 6),
+            _metricChip('R', r != null ? r.toStringAsFixed(2) : 'N/A', Colors.teal),
+            const SizedBox(width: 6),
+            _metricChip('F1', f != null ? f.toStringAsFixed(2) : 'N/A', Colors.purple),
+          ]),
+        ]),
+      );
+    }
+
+    final iso = anomaly['isolation_forest'];
+    final ae = anomaly['autoencoder'];
+    final method = anomaly['injection_method'] as String? ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Anomaly Detection', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.7))),
+        const SizedBox(height: 8),
+        if (iso != null && iso is Map) modelRow('Isolation Forest', Map<String, dynamic>.from(iso as Map)),
+        if (ae != null && ae is Map) modelRow('Autoencoder', Map<String, dynamic>.from(ae as Map)),
+        if (method.isNotEmpty)
+          Text('Method: $method', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.45))),
+      ],
+    );
+  }
+
+  Widget _buildMetricsSectionD(ColorScheme cs) {
+    final dq = _dataQuality;
+    if (dq == null || dq['status'] == 'metadata_not_found') return const SizedBox();
+
+    final chips = <String>[];
+    if (dq['total_records'] != null) chips.add('${dq["total_records"]} records');
+    if (dq['time_window_hours'] != null) chips.add('${dq["time_window_hours"]}h window');
+    if (dq['feature_count'] != null) chips.add('${dq["feature_count"]} features');
+    if (dq['occupancy_rate_pct'] != null) {
+      final rate = (dq['occupancy_rate_pct'] as num).toDouble();
+      chips.add('${(rate * (rate < 1 ? 100 : 1)).toStringAsFixed(1)}% occupancy');
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Dataset Quality', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.7))),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: chips.map((c) => Chip(
+            label: Text(c, style: const TextStyle(fontSize: 11)),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          )).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _metricChip(String label, String value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Text(label, style: TextStyle(fontSize: 9, color: color.withOpacity(0.8), fontWeight: FontWeight.w600)),
+          Text(value, style: TextStyle(fontSize: 13, color: color, fontWeight: FontWeight.bold)),
+        ],
+      ),
     );
   }
 
@@ -2661,6 +3020,20 @@ class _DevicesPageState extends State<DevicesPage> {
                     isLoading: _anomalyLoading,
                     hasError: _anomalyError != null && anomalyData == null,
                   ),
+                  // Label button for research ground-truth collection
+                  if (isAnomaly && anomalyData != null) ...[
+                    const SizedBox(width: 4),
+                    GestureDetector(
+                      onTap: () => _showAnomalyLabelSheet(
+                        context,
+                        anomalyData['detected_at']?.toString() ?? deviceId,
+                      ),
+                      child: Tooltip(
+                        message: 'Label this anomaly',
+                        child: Icon(Icons.label_outline, size: 16, color: Colors.grey[500]),
+                      ),
+                    ),
+                  ],
                   const SizedBox(width: 8),
                   Icon(
                     isExpanded ? Icons.expand_less : Icons.expand_more,
@@ -2672,6 +3045,7 @@ class _DevicesPageState extends State<DevicesPage> {
                 ],
               ),
             ),
+            _buildRelayControl(deviceId),
             if (isExpanded)
               _buildExpandedContent(deviceId, device, readings, faults),
           ],
@@ -2747,6 +3121,62 @@ class _DevicesPageState extends State<DevicesPage> {
       Icons.check_circle,
       color: statusColor,
       size: 28,
+    );
+  }
+
+  void _showAnomalyLabelSheet(BuildContext ctx, String anomalyKey) {
+    showModalBottomSheet(
+      context: ctx,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(Icons.label, size: 18, color: Theme.of(ctx).colorScheme.primary),
+                const SizedBox(width: 8),
+                const Text('Label this anomaly', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              ]),
+              const SizedBox(height: 6),
+              Text(
+                'Your label helps improve anomaly detection precision.',
+                style: TextStyle(fontSize: 12, color: Theme.of(ctx).colorScheme.onSurface.withOpacity(0.6)),
+              ),
+              const SizedBox(height: 16),
+              _labelOption(ctx, sheetCtx, anomalyKey, 'true_positive', 'Real Anomaly', Icons.check_circle, Colors.red),
+              const SizedBox(height: 8),
+              _labelOption(ctx, sheetCtx, anomalyKey, 'false_positive', 'False Alarm', Icons.cancel, Colors.green),
+              const SizedBox(height: 8),
+              _labelOption(ctx, sheetCtx, anomalyKey, 'unsure', 'Not Sure', Icons.help_outline, Colors.grey),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _labelOption(BuildContext ctx, BuildContext sheetCtx, String anomalyKey,
+      String label, String display, IconData icon, Color color) {
+    return ListTile(
+      leading: Icon(icon, color: color),
+      title: Text(display),
+      onTap: () async {
+        Navigator.pop(sheetCtx);
+        final success = await _evalService.labelAnomaly(anomalyKey, label);
+        if (!mounted) return;
+        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+          content: Text(success ? 'Labeled as "$display"' : 'Failed to save label'),
+          duration: const Duration(seconds: 2),
+        ));
+      },
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      tileColor: color.withOpacity(0.06),
     );
   }
 

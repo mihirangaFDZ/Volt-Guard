@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from utils.jwt_handler import get_current_user
 import pandas as pd
 import sys
+import json
 from pathlib import Path
 
 # Add backend directory to path
@@ -24,6 +25,29 @@ router = APIRouter(
 # Initialize LSTM service (lazy loading with thread safety)
 _lstm_service = None
 _lstm_lock = threading.Lock()
+
+# Cache for CI offsets loaded from lstm_evaluation.json
+_ci_cache: dict = {}
+
+def _load_ci_offsets() -> dict:
+    """Load empirical confidence interval offsets from evaluation JSON."""
+    global _ci_cache
+    if _ci_cache:
+        return _ci_cache
+    eval_path = Path("models/lstm_evaluation.json")
+    if eval_path.exists():
+        try:
+            with open(eval_path) as f:
+                data = json.load(f)
+            _ci_cache = {
+                "lower_w": data.get("ci_90_lower_offset_w", -0.15),
+                "upper_w": data.get("ci_90_upper_offset_w", 0.15),
+            }
+        except Exception:
+            _ci_cache = {"lower_w": -0.15, "upper_w": 0.15}
+    else:
+        _ci_cache = {"lower_w": -0.15, "upper_w": 0.15}
+    return _ci_cache
 
 def get_lstm_service():
     """Lazy load LSTM service (thread-safe)"""
@@ -519,8 +543,8 @@ def device_forecast(
                 "avg_power_w": round(avg_power_w, 1),
                 "peak_power_w": round(max(day_powers), 1),
                 "peak_hour": peak_hour,
-                "confidence_low_kwh": round(day_kwh * 0.85, 3),
-                "confidence_high_kwh": round(day_kwh * 1.15, 3),
+                "confidence_low_kwh": round(max(0.0, (day_kwh * 1000 + _load_ci_offsets()["lower_w"]) / 1000), 3),
+                "confidence_high_kwh": round((day_kwh * 1000 + _load_ci_offsets()["upper_w"]) / 1000, 3),
                 "hours_predicted": len(day_powers),
             })
 
@@ -758,3 +782,125 @@ def device_comparison(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Device comparison failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Energy savings report endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/energy-savings-report/{device_id}")
+def energy_savings_report(
+    device_id: str,
+    rate_per_kwh: float = Query(42.5, ge=0, description="Electricity rate in LKR per kWh"),
+):
+    """
+    Measure actual week-over-week energy savings for a device.
+
+    Compares real energy consumption from the current week against the
+    previous week as a baseline, and checks how close the LSTM prediction
+    was to actual consumption. This provides a measurable research metric
+    for energy efficiency improvement.
+    """
+    try:
+        device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        module_id = device.get("module_id")
+        if not module_id:
+            raise HTTPException(status_code=422, detail="Device has no module_id — cannot query energy readings")
+
+        now = datetime.utcnow()
+        cutoff_7d = now - timedelta(hours=168)
+        cutoff_14d = now - timedelta(hours=336)
+
+        def fetch_kwh(start_dt, end_dt) -> float:
+            """Sum energy readings (power_w * hours) between two datetimes."""
+            cursor = energy_col.find(
+                {"module": module_id, "received_at": {"$gte": start_dt, "$lt": end_dt}},
+                {"power_w": 1, "received_at": 1, "_id": 0},
+            ).sort("received_at", 1)
+            docs = list(cursor)
+            if len(docs) < 2:
+                return 0.0
+            total_kwh = 0.0
+            for i in range(1, len(docs)):
+                try:
+                    t_prev = pd.Timestamp(docs[i - 1]["received_at"])
+                    t_curr = pd.Timestamp(docs[i]["received_at"])
+                    dt_hours = (t_curr - t_prev).total_seconds() / 3600.0
+                    if 0 < dt_hours < 2:  # ignore gaps > 2h (device offline)
+                        pw = float(docs[i - 1].get("power_w", 0) or 0)
+                        total_kwh += pw * dt_hours / 1000.0
+                except Exception:
+                    continue
+            return round(total_kwh, 4)
+
+        current_week_kwh = fetch_kwh(cutoff_7d, now)
+        previous_week_kwh = fetch_kwh(cutoff_14d, cutoff_7d)
+
+        if previous_week_kwh > 0:
+            savings_kwh = round(previous_week_kwh - current_week_kwh, 4)
+            savings_pct = round(savings_kwh / previous_week_kwh * 100, 2)
+        else:
+            savings_kwh = 0.0
+            savings_pct = 0.0
+
+        savings_lkr = round(savings_kwh * rate_per_kwh, 2)
+
+        # LSTM prediction accuracy for current week
+        lstm_service = get_lstm_service()
+        lstm_predicted_kwh = None
+        prediction_error_pct = None
+        if lstm_service is not None:
+            try:
+                cursor = energy_col.find(
+                    {"module": module_id, "received_at": {"$gte": cutoff_7d}},
+                ).sort("received_at", -1).limit(2000)
+                recent_data = [_parse_energy_doc(d) for d in cursor]
+                recent_data = [r for r in recent_data if r]
+                if len(recent_data) >= 10:
+                    df = pd.DataFrame(recent_data).sort_values("received_at")
+                    location = device.get("location", "")
+                    all_predictions = _run_7day_lstm_forecast(df, lstm_service, location)
+                    lstm_predicted_kwh = 0.0
+                    for day_offset in range(7):
+                        start_h = day_offset * 24
+                        end_h = min(start_h + 24, len(all_predictions))
+                        day_powers = all_predictions[start_h:end_h]
+                        if day_powers:
+                            lstm_predicted_kwh += sum(day_powers) / len(day_powers) * len(day_powers) / 1000.0
+                    lstm_predicted_kwh = round(lstm_predicted_kwh, 4)
+                    if lstm_predicted_kwh and current_week_kwh:
+                        prediction_error_pct = round(
+                            abs(current_week_kwh - lstm_predicted_kwh) / max(current_week_kwh, 0.001) * 100, 2
+                        )
+            except Exception:
+                pass
+
+        return {
+            "device_id": device_id,
+            "device_name": device.get("device_name", device_id),
+            "location": device.get("location", ""),
+            "current_week_kwh": current_week_kwh,
+            "previous_week_kwh": previous_week_kwh,
+            "savings_kwh": savings_kwh,
+            "savings_pct": savings_pct,
+            "savings_lkr": savings_lkr,
+            "lstm_predicted_kwh": lstm_predicted_kwh,
+            "prediction_vs_actual_pct_error": prediction_error_pct,
+            "rate_per_kwh_lkr": rate_per_kwh,
+            "measurement_method": "week-over-week comparison",
+            "measurement_period": {
+                "current_week_start": cutoff_7d.isoformat(),
+                "current_week_end": now.isoformat(),
+                "previous_week_start": cutoff_14d.isoformat(),
+                "previous_week_end": cutoff_7d.isoformat(),
+            },
+            "generated_at": now.isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Energy savings report failed: {str(e)}")

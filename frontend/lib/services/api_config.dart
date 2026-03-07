@@ -27,6 +27,7 @@ class ApiConfig {
   static const String faultsEndpoint = '/faults';
   static const String mlTrainingEndpoint = '/ml-training';
   static const String behavioralProfilesEndpoint = '/behavioral-profiles';
+  static const String modelEvaluationEndpoint = '/model-evaluation';
 
   // Request timeout duration
   static const Duration requestTimeout = Duration(seconds: 30);

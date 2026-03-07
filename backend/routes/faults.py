@@ -97,13 +97,28 @@ def get_device_health(limit: int = Query(20, ge=1, le=100)):
 
 @router.get("/model-stats")
 def get_model_stats():
+    """Return real anomaly detection evaluation metrics from evaluation JSON."""
+    import json
+    from pathlib import Path
+    eval_path = Path("models/anomaly_evaluation.json")
+    if eval_path.exists():
+        try:
+            with open(eval_path) as f:
+                data = json.load(f)
+            return {
+                "status": "evaluated",
+                "isolation_forest": data.get("isolation_forest", {}),
+                "autoencoder": data.get("autoencoder", {}),
+                "test_set_size": data.get("test_set_size"),
+                "injected_anomaly_count": data.get("injected_anomaly_count"),
+                "injection_method": data.get("injection_method"),
+                "evaluated_at": data.get("evaluated_at"),
+            }
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
     return {
-        "model_accuracy": 0.942,
-        "detection_rate": 0.978,
-        "false_positive_rate": 0.021,
-        "training_data_points": 125000,
-        "last_updated": datetime.utcnow() - timedelta(days=2),
-        "status": "optimal",
+        "status": "not_evaluated",
+        "note": "Run backend/scripts/evaluate_anomaly_detection.py to compute real metrics.",
     }
 
 
