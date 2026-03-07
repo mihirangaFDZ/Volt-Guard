@@ -7,7 +7,7 @@ class ApiConfig {
   // Base URL for the API
   // Change this to your backend server URL
   static const String baseUrl = 'http://10.0.2.2:8000';
-  
+
   // API version prefix
   static const String apiVersion = '/api/v1';
 
@@ -24,6 +24,7 @@ class ApiConfig {
   static const String authEndpoint = '/auth/login';
   static const String signupEndpoint = '/users/signup';
   static const String faultsEndpoint = '/faults';
+  static const String dashboardEndpoint = '/dashboard';
 
   // Request timeout duration
   static const Duration requestTimeout = Duration(seconds: 30);
