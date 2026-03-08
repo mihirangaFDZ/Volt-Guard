@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import devices, energy, prediction, anomalies, user_routes, analytics, zones, faults, behavioral_profiles, model_evaluation
+from routes import devices, energy, prediction, anomalies, user_routes, analytics, zones, faults, behavioral_profiles,optimization,model_evaluation
 from routes.auth_routes import router as auth_router
 from routes.devices import esp32_router
 from routes import ml_training
@@ -58,3 +58,4 @@ app.include_router(esp32_router)
 app.include_router(ml_training.router)
 app.include_router(behavioral_profiles.router)
 app.include_router(model_evaluation.router)
+app.include_router(optimization.router)
