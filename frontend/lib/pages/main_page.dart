@@ -3,7 +3,8 @@ import 'dashboard_page.dart';
 import 'devices_page.dart';
 import 'analytics_page.dart';
 import 'profile_page.dart';
-import 'zones_page.dart';
+import 'chat_page.dart';
+import '../services/ml_training_manager.dart';
 
 /// Main page with bottom navigation bar for app navigation
 class MainPage extends StatefulWidget {
@@ -18,11 +19,19 @@ class _MainPageState extends State<MainPage> {
 
   final List<Widget> _pages = [
     const DashboardPage(),
-    const ZonesPage(),
+    const ChatPage(),
     const DevicesPage(),
     const AnalyticsPage(),
     const ProfilePage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Trigger ML model training once at app startup.
+    // The singleton ensures this only fires once, even if MainPage is rebuilt.
+    MLTrainingManager.instance.ensureModelTrained();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,9 +54,9 @@ class _MainPageState extends State<MainPage> {
             label: 'Dashboard',
           ),
           NavigationDestination(
-            icon: Icon(Icons.location_on_outlined),
-            selectedIcon: Icon(Icons.location_on),
-            label: 'Zones',
+            icon: Icon(Icons.chat_bubble_outline),
+            selectedIcon: Icon(Icons.chat_bubble),
+            label: 'AI Chat',
           ),
           NavigationDestination(
             icon: Icon(Icons.devices_outlined),

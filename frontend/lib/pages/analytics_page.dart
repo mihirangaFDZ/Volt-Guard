@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/energy_reading.dart';
 import '../models/sensor_reading.dart';
 import '../services/analytics_service.dart';
+import '../services/energy_service.dart';
 
 /// Component-focused analytics page for occupancy, comfort, sensor health, and recommendations
 /// using the provided IoT fields (pir/rcwl, temperature, humidity, rssi, uptime, timestamps).
@@ -18,6 +21,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   static const int _maxActiveRecs = 3;
   List<SensorReading> _readings = [];
+  List<EnergyReading> _energyReadings = [];
+  Map<String, dynamic>? _energyUsage;
   bool _loading = true;
   String? _error;
   List<_RecItem> _activeRecItems = [];
@@ -27,37 +32,61 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   // Filter state
   String? _selectedLocation;
   String? _selectedModule;
+  String? _selectedDeviceId;
   List<String> _availableLocations = [];
   List<String> _availableModules = [];
+  List<Map<String, dynamic>> _availableDevices = [];
   bool _filtersLoading = false;
+
+  // Page tab state
+  _AnalyticsTab _selectedTab = _AnalyticsTab.environment;
 
   // Occupancy stats
   Map<String, dynamic>? _occupancyStats;
+
+  // Auto-refresh timer for live updates
+  Timer? _autoRefreshTimer;
+  static const Duration _autoRefreshInterval = Duration(seconds: 30);
 
   @override
   void initState() {
     super.initState();
     _loadFilters();
     _loadReadings();
+    _startAutoRefresh();
+  }
+
+  @override
+  void dispose() {
+    _autoRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    _autoRefreshTimer = Timer.periodic(_autoRefreshInterval, (timer) {
+      if (mounted) {
+        _loadReadings();
+      }
+    });
+  }
+
+  Future<void> _reloadAllData() async {
+    await _loadReadings();
   }
 
   Future<void> _loadFilters() async {
     try {
-      setState(() {
-        _filtersLoading = true;
-      });
       final filters = await _analyticsService.fetchAvailableFilters();
+      final devices = await _analyticsService.fetchDevices();
       if (!mounted) return;
       setState(() {
         _availableLocations = filters['locations'] ?? [];
         _availableModules = filters['modules'] ?? [];
-        _filtersLoading = false;
+        _availableDevices = devices;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _filtersLoading = false;
-      });
       // Don't show error for filters, just continue without them
     }
   }
@@ -69,34 +98,65 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         _error = null;
       });
 
-      final data = await _analyticsService.fetchLatestReadings(
+      final dataFuture = _analyticsService.fetchLatestReadings(
         limit: 50,
         location: _selectedLocation,
         module: _selectedModule,
+        deviceId: _selectedDeviceId,
+      );
+      final occupancyFuture = _analyticsService.fetchOccupancyStats(
+        limit: 50,
+        location: _selectedLocation,
+        module: _selectedModule,
+        deviceId: _selectedDeviceId,
       );
 
-      // Fetch occupancy stats
+      // Use new analytics endpoint for current energy data
+      final energyStatsFuture = _analyticsService.fetchCurrentEnergyStats(
+        limit: 120,
+        location: _selectedLocation,
+        module: _selectedModule,
+        deviceId: _selectedDeviceId,
+      );
+
+      final data = await dataFuture;
+
       Map<String, dynamic>? occupancyStats;
       try {
-        occupancyStats = await _analyticsService.fetchOccupancyStats(
-          limit: 50,
-          location: _selectedLocation,
-          module: _selectedModule,
-        );
-      } catch (e) {
-        // Ignore errors for occupancy stats
+        occupancyStats = await occupancyFuture;
+      } catch (_) {
+        // Occupancy stats are optional and should not block the view.
+      }
+
+      Map<String, dynamic>? energyStats;
+      List<EnergyReading> energyReadings = [];
+      try {
+        energyStats = await energyStatsFuture;
+        // Extract readings from the latest data if available
+        if (energyStats != null && energyStats['latest'] != null) {
+          energyReadings = [
+            EnergyReading.fromJson(
+                Map<String, dynamic>.from(energyStats['latest'] as Map))
+          ];
+        }
+      } catch (_) {
+        // Current energy data is optional for the environment tab.
       }
 
       _DerivedStats? stats;
       if (data.isNotEmpty) {
         stats = _deriveStats(data);
       }
+
       if (!mounted) return;
       setState(() {
         _readings = data;
+        _energyReadings = energyReadings;
+        _energyUsage = energyStats; // Store the full stats object
         _occupancyStats = occupancyStats;
+
         if (stats != null) {
-          final recs = _buildRecList(stats!);
+          final recs = _buildRecList(stats);
           _activeRecItems =
               recs.take(_maxActiveRecs).map((r) => _RecItem(rec: r)).toList();
           _backlogRecs = recs.skip(_maxActiveRecs).toList();
@@ -127,13 +187,17 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         title: const Text('Analytics & Recommendations'),
       ),
       body: RefreshIndicator(
-        onRefresh: _loadReadings,
+        onRefresh: _reloadAllData,
         child: _buildBody(),
       ),
     );
   }
 
   Widget _buildBody() {
+    final bool hasActiveFilters = _selectedLocation != null ||
+        _selectedModule != null ||
+        _selectedDeviceId != null;
+
     if (_loading) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -156,19 +220,6 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       );
     }
 
-    if (_readings.isEmpty) {
-      return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
-        children: [
-          _emptyState(),
-        ],
-      );
-    }
-
-    final SensorReading latest = _latestReading(_readings);
-    final _DerivedStats stats = _deriveStats(_readings);
-
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
@@ -177,22 +228,89 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         children: [
           _buildFilters(),
           const SizedBox(height: 16),
-          _buildHeader(latest, stats),
+          _buildAnalyticsTabs(),
           const SizedBox(height: 16),
-          if (_occupancyStats != null) ...[
-            _buildOccupancyStats(),
-            const SizedBox(height: 16),
-          ],
-          _buildComfortCard(stats),
-          const SizedBox(height: 16),
-          _buildSensorHealth(latest, stats),
-          const SizedBox(height: 16),
-          _buildRecommendations(),
-          const SizedBox(height: 16),
-          _buildRecentReadings(_readings),
+          if (_selectedTab == _AnalyticsTab.environment)
+            ..._buildEnvironmentAnalytics(hasActiveFilters)
+          else
+            ..._buildCurrentEnergyAnalytics(hasActiveFilters),
         ],
       ),
     );
+  }
+
+  Widget _buildAnalyticsTabs() {
+    return SegmentedButton<_AnalyticsTab>(
+      segments: const [
+        ButtonSegment<_AnalyticsTab>(
+          value: _AnalyticsTab.environment,
+          icon: Icon(Icons.analytics_outlined),
+          label: Text('Environment'),
+        ),
+        ButtonSegment<_AnalyticsTab>(
+          value: _AnalyticsTab.currentEnergy,
+          icon: Icon(Icons.electric_bolt),
+          label: Text('Current Energy'),
+        ),
+      ],
+      selected: <_AnalyticsTab>{_selectedTab},
+      showSelectedIcon: false,
+      onSelectionChanged: (selected) {
+        if (selected.isEmpty) return;
+        setState(() {
+          _selectedTab = selected.first;
+        });
+      },
+    );
+  }
+
+  List<Widget> _buildEnvironmentAnalytics(bool hasActiveFilters) {
+    if (_readings.isEmpty) {
+      return [
+        _emptyState(hasActiveFilters: hasActiveFilters),
+      ];
+    }
+
+    final SensorReading latest = _latestReading(_readings);
+    final _DerivedStats stats = _deriveStats(_readings);
+
+    return [
+      _buildHeader(latest, stats),
+      const SizedBox(height: 16),
+      if (_occupancyStats != null) ...[
+        _buildOccupancyStats(),
+        const SizedBox(height: 16),
+      ],
+      _buildComfortCard(stats),
+      const SizedBox(height: 16),
+      _buildSensorHealth(latest, stats),
+      const SizedBox(height: 16),
+      _buildRecommendations(),
+      const SizedBox(height: 16),
+      _buildRecentReadings(_readings),
+    ];
+  }
+
+  List<Widget> _buildCurrentEnergyAnalytics(bool hasActiveFilters) {
+    if (_energyReadings.isEmpty) {
+      return [
+        _currentEnergyEmptyState(hasActiveFilters: hasActiveFilters),
+      ];
+    }
+
+    final _CurrentEnergyStats stats = _deriveCurrentEnergyStats(
+      _energyReadings,
+      usageResponse: _energyUsage,
+      selectedLocation: _selectedLocation,
+    );
+
+    return [
+      _buildCurrentEnergyHeader(stats),
+      const SizedBox(height: 16),
+      _buildCurrentEnergyMetrics(stats),
+      const SizedBox(height: 16),
+      _buildCurrentEnergyReadings(_energyReadings),
+    ];
   }
 
   SensorReading _latestReading(List<SensorReading> readings) {
@@ -235,19 +353,202 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _emptyState() {
-    return const Card(
+  Widget _emptyState({required bool hasActiveFilters}) {
+    return Card(
       elevation: 0,
       child: Padding(
-        padding: EdgeInsets.all(16),
-        child: Row(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.sensors_off, color: Colors.grey),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'No sensor readings yet. Pull to refresh or wait for devices to send data.',
-                style: TextStyle(fontSize: 13),
+            Row(
+              children: [
+                const Icon(Icons.sensors_off, color: Colors.grey),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    hasActiveFilters
+                        ? 'No analytics data found for the selected location/module.'
+                        : 'No sensor readings yet. Pull to refresh or wait for devices to send data.',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            if (hasActiveFilters) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _selectedLocation = null;
+                      _selectedModule = null;
+                      _selectedDeviceId = null;
+                    });
+                    _loadReadings();
+                  },
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Back to Analytics'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _currentEnergyEmptyState({required bool hasActiveFilters}) {
+    return Card(
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.bolt_outlined, color: Colors.grey),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    hasActiveFilters
+                        ? 'No current-energy readings found for the selected location/module.'
+                        : 'No current-energy readings yet. Wait for ESP32 energy data and refresh.',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            if (hasActiveFilters) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _selectedLocation = null;
+                      _selectedModule = null;
+                      _selectedDeviceId = null;
+                    });
+                    _loadReadings();
+                  },
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Back to Analytics'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCurrentEnergyHeader(_CurrentEnergyStats stats) {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.electric_bolt, color: stats.trendColor),
+                const SizedBox(width: 8),
+                const Text(
+                  'Current Energy Analysis',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                if (stats.latest != null)
+                  Text(
+                    'Last seen: ${_friendlyTime(stats.latest!.receivedAt)}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.6),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (stats.latest != null) ...[
+                  _pill('${stats.latest!.location} • ${stats.latest!.module}'),
+                  _pill('Sensor: ${stats.latest!.sensor}'),
+                  _pill('Type: ${stats.latest!.type ?? 'current'}'),
+                ],
+                _pill(
+                    'Trend: ${stats.trendLabel} (${stats.deltaPercent.toStringAsFixed(1)}%)'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCurrentEnergyMetrics(_CurrentEnergyStats stats) {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.insights, color: Colors.green),
+                SizedBox(width: 8),
+                Text(
+                  'Current Metrics',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _energyMetricTile(
+                    'Latest Current',
+                    '${stats.latestCurrentA.toStringAsFixed(3)} A',
+                    Colors.blue),
+                _energyMetricTile(
+                    'Latest Current',
+                    '${stats.latestCurrentMa.toStringAsFixed(0)} mA',
+                    Colors.indigo),
+                _energyMetricTile('Avg Current',
+                    '${stats.avgCurrentA.toStringAsFixed(3)} A', Colors.teal),
+                _energyMetricTile('Peak Current',
+                    '${stats.maxCurrentA.toStringAsFixed(3)} A', Colors.orange),
+                _energyMetricTile(
+                    'Estimated Power',
+                    '${stats.latestPowerW.toStringAsFixed(1)} W',
+                    Colors.deepOrange),
+                _energyMetricTile('Avg Power',
+                    '${stats.avgPowerW.toStringAsFixed(1)} W', Colors.purple),
+                _energyMetricTile('Signal', '${stats.latestRssi ?? 'n/a'} dBm',
+                    stats.signalColor),
+                _energyMetricTile('Energy (kWh)',
+                    stats.estimatedEnergyKwh.toStringAsFixed(4), Colors.green),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Samples: ${stats.sampleCount} | Window: ${stats.windowMinutes} min',
+              style: TextStyle(
+                fontSize: 12,
+                color:
+                    Theme.of(context).colorScheme.onSurface.withOpacity(0.65),
               ),
             ),
           ],
@@ -256,9 +557,114 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
+  Widget _buildCurrentEnergyReadings(List<EnergyReading> readings) {
+    final List<EnergyReading> sorted = List.of(readings)
+      ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+    final List<EnergyReading> latestTen = sorted.take(10).toList();
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.tune, color: Colors.indigo),
+                SizedBox(width: 8),
+                Text(
+                  'Latest Current Readings',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ...latestTen.map(_energyReadingRow),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _energyReadingRow(EnergyReading reading) {
+    final double powerW = reading.currentA * 230.0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          const Icon(Icons.bolt, color: Colors.green),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${reading.location} • ${reading.module}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${reading.currentA.toStringAsFixed(3)} A | ${reading.currentMa.toStringAsFixed(0)} mA | ${powerW.toStringAsFixed(1)} W',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.7),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            _friendlyTime(reading.receivedAt),
+            style: TextStyle(
+              fontSize: 11,
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _energyMetricTile(String label, String value, Color color) {
+    return Container(
+      width: 155,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFilters() {
-    final bool hasActiveFilters =
-        _selectedLocation != null || _selectedModule != null;
+    final bool hasActiveFilters = _selectedLocation != null ||
+        _selectedModule != null ||
+        _selectedDeviceId != null;
 
     return Card(
       elevation: 2,
@@ -282,6 +688,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                       setState(() {
                         _selectedLocation = null;
                         _selectedModule = null;
+                        _selectedDeviceId = null;
                       });
                       _loadReadings();
                     },
@@ -350,6 +757,39 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               onChanged: (value) {
                 setState(() {
                   _selectedModule = value;
+                });
+                _loadReadings();
+              },
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _selectedDeviceId,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Device',
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                isDense: true,
+              ),
+              items: [
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text('All Devices'),
+                ),
+                ..._availableDevices.map((device) {
+                  final id = (device['device_id'] ?? '').toString();
+                  final name = (device['device_name'] ?? '').toString();
+                  final label = name.isNotEmpty ? '$name ($id)' : id;
+                  return DropdownMenuItem<String>(
+                    value: id,
+                    child: Text(label, overflow: TextOverflow.ellipsis),
+                  );
+                }),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _selectedDeviceId = value;
                 });
                 _loadReadings();
               },
@@ -1061,6 +1501,49 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   }
 }
 
+enum _AnalyticsTab {
+  environment,
+  currentEnergy,
+}
+
+class _CurrentEnergyStats {
+  _CurrentEnergyStats({
+    required this.latest,
+    required this.latestCurrentA,
+    required this.latestCurrentMa,
+    required this.avgCurrentA,
+    required this.minCurrentA,
+    required this.maxCurrentA,
+    required this.latestPowerW,
+    required this.avgPowerW,
+    required this.sampleCount,
+    required this.windowMinutes,
+    required this.deltaPercent,
+    required this.trendLabel,
+    required this.trendColor,
+    required this.latestRssi,
+    required this.signalColor,
+    required this.estimatedEnergyKwh,
+  });
+
+  final EnergyReading? latest;
+  final double latestCurrentA;
+  final double latestCurrentMa;
+  final double avgCurrentA;
+  final double minCurrentA;
+  final double maxCurrentA;
+  final double latestPowerW;
+  final double avgPowerW;
+  final int sampleCount;
+  final int windowMinutes;
+  final double deltaPercent;
+  final String trendLabel;
+  final Color trendColor;
+  final int? latestRssi;
+  final Color signalColor;
+  final double estimatedEnergyKwh;
+}
+
 class _DerivedStats {
   _DerivedStats({
     required this.avgTemp,
@@ -1108,10 +1591,10 @@ class _Recommendation {
 }
 
 class _RecItem {
-  _RecItem({required this.rec, this.completed = false});
+  _RecItem({required this.rec});
 
   final _Recommendation rec;
-  bool completed;
+  bool completed = false;
 }
 
 class _CompletedEntry {
@@ -1119,6 +1602,228 @@ class _CompletedEntry {
 
   final _RecItem item;
   final DateTime completedAt;
+}
+
+_CurrentEnergyStats _deriveCurrentEnergyStats(
+  List<EnergyReading> readings, {
+  Map<String, dynamic>? usageResponse,
+  String? selectedLocation,
+}) {
+  // If we have backend stats, use them directly
+  if (usageResponse != null && usageResponse.containsKey('current_a')) {
+    final currentAData =
+        usageResponse['current_a'] as Map<String, dynamic>? ?? {};
+    final currentMaData =
+        usageResponse['current_ma'] as Map<String, dynamic>? ?? {};
+    final powerWData = usageResponse['power_w'] as Map<String, dynamic>? ?? {};
+    final trendData = usageResponse['trend'] as Map<String, dynamic>? ?? {};
+    final signalData = usageResponse['signal'] as Map<String, dynamic>? ?? {};
+
+    final double latestCurrentA =
+        (currentAData['latest'] as num?)?.toDouble() ?? 0;
+    final double latestCurrentMa =
+        (currentMaData['latest'] as num?)?.toDouble() ?? 0;
+    final double avgCurrentA = (currentAData['avg'] as num?)?.toDouble() ?? 0;
+    final double minCurrentA = (currentAData['min'] as num?)?.toDouble() ?? 0;
+    final double maxCurrentA = (currentAData['max'] as num?)?.toDouble() ?? 0;
+
+    final double latestPowerW = (powerWData['latest'] as num?)?.toDouble() ?? 0;
+    final double avgPowerW = (powerWData['avg'] as num?)?.toDouble() ?? 0;
+
+    final double deltaPercent =
+        (trendData['percent_change'] as num?)?.toDouble() ?? 0;
+    final String trendDirection =
+        trendData['direction']?.toString() ?? 'stable';
+
+    final String trendLabel;
+    final Color trendColor;
+    if (trendDirection == 'stable') {
+      trendLabel = 'Stable';
+      trendColor = Colors.blue;
+    } else if (trendDirection == 'rising') {
+      trendLabel = 'Rising';
+      trendColor = Colors.orange;
+    } else {
+      trendLabel = 'Falling';
+      trendColor = Colors.green;
+    }
+
+    final int? latestRssi = signalData['latest_rssi'] as int?;
+    final String signalQuality = signalData['quality']?.toString() ?? 'unknown';
+
+    final Color signalColor;
+    if (signalQuality == 'strong') {
+      signalColor = Colors.green;
+    } else if (signalQuality == 'fair') {
+      signalColor = Colors.orange;
+    } else if (signalQuality == 'weak') {
+      signalColor = Colors.red;
+    } else {
+      signalColor = Colors.grey;
+    }
+
+    final double estimatedEnergyKwh =
+        (usageResponse['estimated_energy_kwh'] as num?)?.toDouble() ?? 0;
+    final int sampleCount = usageResponse['total_readings'] as int? ?? 0;
+    final int windowMinutes = usageResponse['time_window_minutes'] as int? ?? 0;
+
+    // Parse the latest reading if available
+    EnergyReading? latest;
+    if (usageResponse['latest'] != null) {
+      try {
+        latest = EnergyReading.fromJson(
+            Map<String, dynamic>.from(usageResponse['latest'] as Map));
+      } catch (_) {
+        // Use first reading as fallback
+        latest = readings.isNotEmpty ? readings.first : null;
+      }
+    } else {
+      latest = readings.isNotEmpty ? readings.first : null;
+    }
+
+    return _CurrentEnergyStats(
+      latest: latest,
+      latestCurrentA: latestCurrentA,
+      latestCurrentMa: latestCurrentMa,
+      avgCurrentA: avgCurrentA,
+      minCurrentA: minCurrentA,
+      maxCurrentA: maxCurrentA,
+      latestPowerW: latestPowerW,
+      avgPowerW: avgPowerW,
+      sampleCount: sampleCount,
+      windowMinutes: windowMinutes,
+      deltaPercent: deltaPercent,
+      trendLabel: trendLabel,
+      trendColor: trendColor,
+      latestRssi: latestRssi,
+      signalColor: signalColor,
+      estimatedEnergyKwh: estimatedEnergyKwh,
+    );
+  }
+
+  // Fallback to client-side computation if backend data not available
+  if (readings.isEmpty) {
+    return _CurrentEnergyStats(
+      latest: null,
+      latestCurrentA: 0,
+      latestCurrentMa: 0,
+      avgCurrentA: 0,
+      minCurrentA: 0,
+      maxCurrentA: 0,
+      latestPowerW: 0,
+      avgPowerW: 0,
+      sampleCount: 0,
+      windowMinutes: 0,
+      deltaPercent: 0,
+      trendLabel: 'Stable',
+      trendColor: Colors.blue,
+      latestRssi: null,
+      signalColor: Colors.grey,
+      estimatedEnergyKwh: 0,
+    );
+  }
+
+  final List<EnergyReading> sorted = List.of(readings)
+    ..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
+
+  final EnergyReading latest = sorted.last;
+  final List<double> currentValues =
+      sorted.map((r) => r.currentA).where((v) => v >= 0).toList();
+
+  final double avgCurrentA = currentValues.isEmpty
+      ? 0
+      : currentValues.reduce((a, b) => a + b) / currentValues.length;
+  final double minCurrentA =
+      currentValues.isEmpty ? 0 : currentValues.reduce((a, b) => a < b ? a : b);
+  final double maxCurrentA =
+      currentValues.isEmpty ? 0 : currentValues.reduce((a, b) => a > b ? a : b);
+
+  final double latestPowerW = latest.currentA * 230.0;
+  final double avgPowerW = avgCurrentA * 230.0;
+
+  final List<EnergyReading> recentSlice =
+      sorted.length >= 6 ? sorted.sublist(sorted.length - 3) : sorted;
+  final List<EnergyReading> baselineSlice = sorted.length >= 6
+      ? sorted.sublist(sorted.length - 6, sorted.length - 3)
+      : sorted;
+
+  final double recentAvg = recentSlice.isEmpty
+      ? 0
+      : recentSlice.map((r) => r.currentA).reduce((a, b) => a + b) /
+          recentSlice.length;
+  final double baselineAvg = baselineSlice.isEmpty
+      ? 0
+      : baselineSlice.map((r) => r.currentA).reduce((a, b) => a + b) /
+          baselineSlice.length;
+
+  final double deltaPercent =
+      baselineAvg == 0 ? 0 : ((recentAvg - baselineAvg) / baselineAvg) * 100;
+
+  final String trendLabel;
+  final Color trendColor;
+  if (deltaPercent.abs() < 5) {
+    trendLabel = 'Stable';
+    trendColor = Colors.blue;
+  } else if (deltaPercent > 0) {
+    trendLabel = 'Rising';
+    trendColor = Colors.orange;
+  } else {
+    trendLabel = 'Falling';
+    trendColor = Colors.green;
+  }
+
+  final int? latestRssi = latest.wifiRssi;
+  final Color signalColor;
+  if (latestRssi == null) {
+    signalColor = Colors.grey;
+  } else if (latestRssi >= -60) {
+    signalColor = Colors.green;
+  } else if (latestRssi >= -75) {
+    signalColor = Colors.orange;
+  } else {
+    signalColor = Colors.red;
+  }
+
+  double estimatedEnergyKwh = 0;
+  final dynamic usageList = usageResponse?['usage'];
+  if (usageList is List) {
+    final Iterable<Map<String, dynamic>> rows =
+        usageList.whereType<Map>().map((e) => Map<String, dynamic>.from(e));
+    for (final row in rows) {
+      final String rowLocation = (row['location'] ?? '').toString();
+      if (selectedLocation != null &&
+          selectedLocation.isNotEmpty &&
+          rowLocation != selectedLocation) {
+        continue;
+      }
+      final double kwh = (row['energy_kwh'] as num?)?.toDouble() ?? 0;
+      estimatedEnergyKwh += kwh;
+    }
+  }
+
+  final DateTime firstTime = sorted.first.receivedAt;
+  final DateTime lastTime = sorted.last.receivedAt;
+  final int windowMinutes =
+      lastTime.difference(firstTime).inMinutes.clamp(0, 1 << 16).toInt();
+
+  return _CurrentEnergyStats(
+    latest: latest,
+    latestCurrentA: latest.currentA,
+    latestCurrentMa: latest.currentMa,
+    avgCurrentA: avgCurrentA,
+    minCurrentA: minCurrentA,
+    maxCurrentA: maxCurrentA,
+    latestPowerW: latestPowerW,
+    avgPowerW: avgPowerW,
+    sampleCount: sorted.length,
+    windowMinutes: windowMinutes,
+    deltaPercent: deltaPercent,
+    trendLabel: trendLabel,
+    trendColor: trendColor,
+    latestRssi: latestRssi,
+    signalColor: signalColor,
+    estimatedEnergyKwh: estimatedEnergyKwh,
+  );
 }
 
 _DerivedStats _deriveStats(List<SensorReading> readings) {
