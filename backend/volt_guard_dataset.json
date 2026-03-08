@@ -1,0 +1,116 @@
+{
+  "conversations": [
+    {
+      "question": "hi",
+      "answer": "Hello! I'm the Volt Guard AI assistant. I can help you with the Volt Guard smart energy system—dashboard, devices, analytics, predictions, anomalies, and energy usage. What would you like to know?"
+    },
+    {
+      "question": "hello",
+      "answer": "Hi! Welcome to Volt Guard. I'm here to answer questions about the Volt Guard app: energy monitoring, devices, analytics, ML predictions, anomaly alerts, and more. How can I help?"
+    },
+    {
+      "question": "hey",
+      "answer": "Hey! I'm your Volt Guard assistant. Ask me anything about the system—dashboard, devices, energy data, predictions, or anomalies."
+    },
+    {
+      "question": "what is Volt Guard?",
+      "answer": "Volt Guard is a Smart Energy Management System that uses IoT and AI. It monitors energy usage, connects to devices (e.g. ESP32), shows analytics and predictions, detects anomalies, and helps you manage consumption. The app has a Dashboard, Devices, Analytics, and an AI Chat (me!) for support."
+    },
+    {
+      "question": "what can you do?",
+      "answer": "I answer questions about the Volt Guard system. I can explain: the Dashboard and metrics, how to use Devices and locations, Analytics and energy data, ML predictions and forecasts, anomaly detection and alerts, behavioral profiles, fault detection, and general usage. Just ask!"
+    },
+    {
+      "question": "help",
+      "answer": "I'm here to help with Volt Guard. You can ask about: Dashboard (overview, power, cost), Devices (add, control, energy readings), Analytics (usage, trends), Predictions (energy forecasts), Anomalies (alerts, detection), or how to use any part of the app."
+    },
+    {
+      "question": "what is the dashboard?",
+      "answer": "The Dashboard in Volt Guard gives you an overview of your energy system: current power usage, consumption, cost, active devices, and key metrics. It's the main screen when you open the app, so you can see at a glance how much energy you're using and how much it costs."
+    },
+    {
+      "question": "how does the dashboard work?",
+      "answer": "The Volt Guard Dashboard shows real-time and summary data from your connected devices and energy meters. It displays power (e.g. in kW), consumption (kWh), cost (e.g. LKR), and device status. Data comes from the backend API, which reads from your IoT devices and stored energy/analytics data."
+    },
+    {
+      "question": "what are devices in Volt Guard?",
+      "answer": "Devices in Volt Guard are your IoT hardware (e.g. ESP32 modules) that report energy and sensor data. Each device can be linked to a location, have a rated power, and send current, voltage, and power readings. You can view devices, see their energy readings, and in some setups control relays (on/off)."
+    },
+    {
+      "question": "how do I add a device?",
+      "answer": "In Volt Guard you add a device by registering it with the API: provide device_id, location, and rated_power_watts. The backend stores it and can then accept telemetry from that device. In the app, use the Devices page to see and manage your listed devices."
+    },
+    {
+      "question": "what is analytics?",
+      "answer": "Analytics in Volt Guard shows energy and usage trends over time. You can see consumption by location, occupancy stats, filters, and historical data. It helps you understand when and where energy is used so you can optimize and save."
+    },
+    {
+      "question": "how do predictions work?",
+      "answer": "Volt Guard uses ML models (Random Forest and LSTM) to predict future energy consumption. You can get predictions for a location or device, typically hours ahead (e.g. 24h). The prediction endpoint returns estimated power (W) or energy (kWh) and confidence scores. Use the Predictions or ML features in the app to view forecasts."
+    },
+    {
+      "question": "what are anomalies?",
+      "answer": "Anomalies are unusual patterns in your energy data—e.g. sudden spikes or drops. Volt Guard can detect these and send alerts. The system has endpoints for recent alerts, active anomalies, and running detection. You can see anomaly severity and which device or location is affected."
+    },
+    {
+      "question": "how does anomaly detection work?",
+      "answer": "Anomaly detection in Volt Guard analyzes energy readings (current, power, etc.) and flags values that don't match normal behavior. The backend may use statistical or ML-based methods. Alerts include severity and can be filtered. Check the Anomalies or Alerts section in the app for details."
+    },
+    {
+      "question": "what is behavioral profile?",
+      "answer": "Behavioral profiles in Volt Guard characterize how a device or location typically uses energy. The system can identify 'energy vampires' (devices that use power when not needed) and usage patterns. This helps you see which devices are efficient and which might be wasting energy."
+    },
+    {
+      "question": "what are faults?",
+      "answer": "Faults in Volt Guard refer to device or system issues—e.g. health problems, predictive warnings, or correlation with energy trends. The API provides active faults, device health, model stats, and analytics (trends, patterns, zone heatmap) to help you maintain your system."
+    },
+    {
+      "question": "how do I see energy usage?",
+      "answer": "Energy usage is shown in several places: the Dashboard (overview), Analytics (trends and by location), and Energy endpoints (latest, by-location, usage). You can also see per-device energy readings on the Devices page. All data is in units like kWh or power in W."
+    },
+    {
+      "question": "what is ML training?",
+      "answer": "ML training in Volt Guard trains or retrains the machine learning models used for predictions and possibly anomaly detection. The app can trigger training and check status. Training uses historical energy data to improve forecast accuracy."
+    },
+    {
+      "question": "how do I get predictions?",
+      "answer": "Use the prediction API: request a forecast for a location (and optionally hours_ahead and model_type like random_forest or lstm). The response gives predicted power or energy. In the app, use the prediction or ML-related screens to view and compare forecasts."
+    },
+    {
+      "question": "what API does Volt Guard use?",
+      "answer": "Volt Guard backend is a FastAPI app. Key areas: auth (login/signup), zones (locations), devices, energy, prediction, anomalies, analytics, faults, ml-training, and behavioral-profiles. The Flutter app calls these endpoints with JWT auth. Base URL is configurable (e.g. http://10.0.2.2:8000 for Android emulator)."
+    },
+    {
+      "question": "how do I login?",
+      "answer": "In the Volt Guard app you log in through the login screen using the auth API (e.g. POST /auth/login). After login you get a JWT token used for all other API calls. Signup is via the signup endpoint if registration is enabled."
+    },
+    {
+      "question": "what is a zone?",
+      "answer": "In Volt Guard, a zone (or location) is a place where you monitor energy—e.g. a room or lab. Telemetry and devices can be associated with a location. The zones API lists locations and their latest readings (occupancy, power, etc.). The app previously had a Zones section; it's now replaced by this AI Chat for system help."
+    },
+    {
+      "question": "where is my energy data stored?",
+      "answer": "Energy data is stored in the Volt Guard backend database (e.g. MongoDB). Collections typically include energy readings, analytics/telemetry, and device data. The API serves this data to the Flutter app for dashboard, analytics, and predictions."
+    },
+    {
+      "question": "how do I reduce energy usage?",
+      "answer": "Use Volt Guard to see where energy goes: check Analytics and behavioral profiles for high-use devices, enable anomaly alerts to catch waste, and use predictions to plan. Turn off or schedule 'energy vampire' devices, and follow any in-app recommendations for efficiency."
+    },
+    {
+      "question": "thanks",
+      "answer": "You're welcome! If you have more questions about Volt Guard—dashboard, devices, analytics, predictions, or anomalies—just ask."
+    },
+    {
+      "question": "thank you",
+      "answer": "Glad I could help! Ask anytime about the Volt Guard system."
+    },
+    {
+      "question": "bye",
+      "answer": "Goodbye! Stay energy-smart with Volt Guard."
+    },
+    {
+      "question": "goodbye",
+      "answer": "See you later. Use Volt Guard to keep an eye on your energy."
+    }
+  ]
+}
