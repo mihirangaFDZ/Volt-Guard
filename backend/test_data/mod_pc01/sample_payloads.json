@@ -1,0 +1,72 @@
+{
+  "description": "Minimal sample payloads for MOD_PC_01 / M_ROOM — use for API or manual tests.",
+  "energy_readings": [
+    {
+      "module": "MOD_PC_01",
+      "location": "M_ROOM",
+      "sensor": "ACS712-20A",
+      "current_ma": 0,
+      "current_a": 0,
+      "adc_samples": 200,
+      "vref": 3.3,
+      "wifi_rssi": -54,
+      "counter": 476,
+      "uptime_ms": 5110065,
+      "relay_state": "ON"
+    },
+    {
+      "module": "MOD_PC_01",
+      "location": "M_ROOM",
+      "sensor": "ACS712-20A",
+      "current_ma": 913,
+      "current_a": 0.913,
+      "adc_samples": 200,
+      "vref": 3.3,
+      "wifi_rssi": -52,
+      "counter": 477,
+      "uptime_ms": 5110365,
+      "relay_state": "ON"
+    },
+    {
+      "module": "MOD_PC_01",
+      "location": "M_ROOM",
+      "sensor": "ACS712-20A",
+      "current_ma": 3044,
+      "current_a": 3.044,
+      "adc_samples": 200,
+      "vref": 3.3,
+      "wifi_rssi": -50,
+      "counter": 478,
+      "uptime_ms": 5110665,
+      "relay_state": "ON"
+    }
+  ],
+  "telemetry_readings": [
+    {
+      "module": "MOD001",
+      "location": "M_ROOM",
+      "rcwl": 1,
+      "pir": 1,
+      "rssi": -55,
+      "uptime": 60,
+      "heap": 39336,
+      "ip": "10.36.15.193",
+      "mac": "60:01:94:36:A2:F4",
+      "temperature": 33.2,
+      "humidity": 68.0
+    },
+    {
+      "module": "MOD001",
+      "location": "M_ROOM",
+      "rcwl": 0,
+      "pir": 0,
+      "rssi": -58,
+      "uptime": 120,
+      "heap": 38900,
+      "ip": "10.36.15.193",
+      "mac": "60:01:94:36:A2:F4",
+      "temperature": 28.5,
+      "humidity": 72.0
+    }
+  ]
+}
