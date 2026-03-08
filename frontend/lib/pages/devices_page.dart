@@ -886,7 +886,7 @@ class _DevicesPageState extends State<DevicesPage> {
                       CircularProgressIndicator(),
                       SizedBox(height: 12),
                       Text(
-                        'Running LSTM forecast...',
+                        'Generating forecast...',
                         style: TextStyle(color: Colors.grey, fontSize: 13),
                       ),
                     ],
@@ -977,6 +977,7 @@ class _DevicesPageState extends State<DevicesPage> {
   Widget _buildWeeklySnapshot() {
     final forecast = _deviceForecast!;
     final weeklyKwh = (forecast['weekly_total_kwh'] as num).toDouble();
+    final modelType = forecast['model_type'] as String? ?? 'lstm';
     final comparison = forecast['comparison'] as Map<String, dynamic>;
     final percentChange = (comparison['percent_change'] as num).toDouble();
     final trend = comparison['trend'] as String;
@@ -1094,6 +1095,14 @@ class _DevicesPageState extends State<DevicesPage> {
                       style:
                           TextStyle(fontSize: 10, color: Colors.grey.shade600),
                     ),
+                    if (modelType == 'behavioral_profile')
+                      Text(
+                        'from usage pattern',
+                        style: TextStyle(
+                            fontSize: 9,
+                            color: Colors.indigo.shade600,
+                            fontStyle: FontStyle.italic),
+                      ),
                   ],
                 ),
               ),

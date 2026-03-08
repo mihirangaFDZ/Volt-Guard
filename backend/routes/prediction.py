@@ -15,6 +15,7 @@ backend_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from app.services.lstm_service import LSTMPredictor
+from app.services.behavioral_profile_service import BehavioralProfileService
 import threading
 
 router = APIRouter(
@@ -452,6 +453,50 @@ def _aggregate_daily(readings_data, start_date, num_days, is_historical=False):
     return daily
 
 
+def _forecast_from_behavioral_profile(profile: dict, now: datetime):
+    """
+    Build 7-day daily forecast from a device's behavioral profile.
+    Uses the hourly_profile (avg power per hour 0-23) to predict each day's usage.
+    """
+    hourly_profile = profile.get("hourly_profile") or []
+    if len(hourly_profile) == 0:
+        return None, 0.0
+
+    # Map hour -> avg_power_w (ensure all 24 hours)
+    hour_to_power = {int(p["hour"]): float(p.get("avg_power_w", 0)) for p in hourly_profile}
+    daily_kwh_from_profile = sum(hour_to_power.get(h, 0.0) for h in range(24)) / 1000.0  # W * 1hr = Wh -> kWh
+    avg_power_w = sum(hour_to_power.get(h, 0.0) for h in range(24)) / 24.0
+    peak_power_w = max(hour_to_power.get(h, 0.0) for h in range(24)) if hour_to_power else 0.0
+    peak_hour = max(range(24), key=lambda h: hour_to_power.get(h, 0.0)) if hour_to_power else 0
+
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    daily_forecast = []
+    weekly_total_kwh = 0.0
+    ci = _load_ci_offsets()
+    confidence_pct = 0.15  # ±15% for behavioral-based forecast
+
+    for day_offset in range(7):
+        target_date = now + timedelta(days=day_offset + 1)
+        day_name = day_names[target_date.weekday()]
+        day_kwh = daily_kwh_from_profile  # same pattern each day from profile
+        weekly_total_kwh += day_kwh
+        low_kwh = max(0.0, day_kwh * (1.0 - confidence_pct))
+        high_kwh = day_kwh * (1.0 + confidence_pct)
+        daily_forecast.append({
+            "day": day_name,
+            "date": target_date.strftime("%Y-%m-%d"),
+            "predicted_kwh": round(day_kwh, 3),
+            "avg_power_w": round(avg_power_w, 1),
+            "peak_power_w": round(peak_power_w, 1),
+            "peak_hour": peak_hour,
+            "confidence_low_kwh": round(low_kwh, 3),
+            "confidence_high_kwh": round(high_kwh, 3),
+            "hours_predicted": 24,
+        })
+
+    return daily_forecast, weekly_total_kwh
+
+
 # ---------------------------------------------------------------------------
 # Per-device forecast endpoint
 # ---------------------------------------------------------------------------
@@ -464,17 +509,10 @@ def device_forecast(
     Get a 7-day energy forecast for a specific device.
 
     Returns forecast, historical comparison, risk level, and cost projections.
-    Uses the device's module_id to query its energy readings, then runs the
-    LSTM model for a 7-day (168-hour) prediction.
+    Uses the device's behavioral profile (hourly usage pattern) to predict future
+    usage for the next 7 days. Falls back to LSTM if no behavioral profile exists.
     """
     try:
-        lstm_service = get_lstm_service()
-        if lstm_service is None:
-            raise HTTPException(
-                status_code=503,
-                detail="LSTM model not trained yet. Please train models first.",
-            )
-
         # 1. Look up device
         device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
         if not device:
@@ -489,7 +527,6 @@ def device_forecast(
 
         device_name = device.get("device_name", device_id)
         location = device.get("location", "")
-
         now = datetime.utcnow()
 
         # 2. Get last 7 days of actual energy data for this device
@@ -543,45 +580,67 @@ def device_forecast(
         daily_prev = _aggregate_daily(prev_data, prev_start, 7, is_historical=True)
         last_week_total_kwh = sum(d["actual_kwh"] for d in daily_prev)
 
-        # 4. Run LSTM 7-day forecast
-        df = pd.DataFrame(recent_data).sort_values("received_at")
-        all_predictions = _run_7day_lstm_forecast(df, lstm_service, location)
-
-        # 5. Aggregate forecast into daily breakdown
-        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        daily_forecast = []
+        # 4. Prefer behavioral profile for 7-day forecast (future usage prediction from usage pattern)
+        daily_forecast = None
         weekly_total_kwh = 0.0
+        model_type = "lstm"
+        all_predictions = []  # used for hours_ahead when saving; set by LSTM or placeholder for behavioral
 
-        for day_offset in range(7):
-            start_hour = day_offset * 24
-            end_hour = min(start_hour + 24, len(all_predictions))
-            day_powers = all_predictions[start_hour:end_hour]
+        try:
+            profile_service = BehavioralProfileService()
+            profile = profile_service.build_profile(device_id, hours_back=168)
+            if profile and (profile.get("hourly_profile") or []):
+                daily_forecast, weekly_total_kwh = _forecast_from_behavioral_profile(profile, now)
+                if daily_forecast and len(daily_forecast) == 7 and weekly_total_kwh > 0:
+                    model_type = "behavioral_profile"
+                    all_predictions = [0] * 168  # 7 days * 24h for hours_ahead when saving
+        except Exception:
+            pass
 
-            if not day_powers:
-                continue
+        # 5. Fallback to LSTM if no behavioral forecast
+        if daily_forecast is None or model_type == "lstm":
+            lstm_service = get_lstm_service()
+            if lstm_service is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="LSTM model not trained yet and no behavioral profile available. "
+                           "Please train models or ensure device has enough history for a profile.",
+                )
+            df = pd.DataFrame(recent_data).sort_values("received_at")
+            all_predictions = _run_7day_lstm_forecast(df, lstm_service, location)
 
-            avg_power_w = sum(day_powers) / len(day_powers)
-            day_kwh = avg_power_w * len(day_powers) / 1000.0
-            weekly_total_kwh += day_kwh
+            day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            daily_forecast = []
+            weekly_total_kwh = 0.0
 
-            target_date = now + timedelta(days=day_offset + 1)
-            day_name = day_names[target_date.weekday()]
+            for day_offset in range(7):
+                start_hour = day_offset * 24
+                end_hour = min(start_hour + 24, len(all_predictions))
+                day_powers = all_predictions[start_hour:end_hour]
 
-            # Find peak hour
-            peak_idx = day_powers.index(max(day_powers))
-            peak_hour = peak_idx  # hour 0-23
+                if not day_powers:
+                    continue
 
-            daily_forecast.append({
-                "day": day_name,
-                "date": target_date.strftime("%Y-%m-%d"),
-                "predicted_kwh": round(day_kwh, 3),
-                "avg_power_w": round(avg_power_w, 1),
-                "peak_power_w": round(max(day_powers), 1),
-                "peak_hour": peak_hour,
-                "confidence_low_kwh": round(max(0.0, (day_kwh * 1000 + _load_ci_offsets()["lower_w"]) / 1000), 3),
-                "confidence_high_kwh": round((day_kwh * 1000 + _load_ci_offsets()["upper_w"]) / 1000, 3),
-                "hours_predicted": len(day_powers),
-            })
+                avg_power_w = sum(day_powers) / len(day_powers)
+                day_kwh = avg_power_w * len(day_powers) / 1000.0
+                weekly_total_kwh += day_kwh
+
+                target_date = now + timedelta(days=day_offset + 1)
+                day_name = day_names[target_date.weekday()]
+                peak_idx = day_powers.index(max(day_powers))
+                peak_hour = peak_idx
+
+                daily_forecast.append({
+                    "day": day_name,
+                    "date": target_date.strftime("%Y-%m-%d"),
+                    "predicted_kwh": round(day_kwh, 3),
+                    "avg_power_w": round(avg_power_w, 1),
+                    "peak_power_w": round(max(day_powers), 1),
+                    "peak_hour": peak_hour,
+                    "confidence_low_kwh": round(max(0.0, (day_kwh * 1000 + _load_ci_offsets()["lower_w"]) / 1000), 3),
+                    "confidence_high_kwh": round((day_kwh * 1000 + _load_ci_offsets()["upper_w"]) / 1000, 3),
+                    "hours_predicted": len(day_powers),
+                })
 
         # 6. Comparison metrics
         historical_avg_daily = historical_total_kwh / 7.0 if historical_total_kwh > 0 else 0
@@ -646,7 +705,7 @@ def device_forecast(
             "device_name": device_name,
             "module_id": module_id,
             "location": location,
-            "model_type": "lstm",
+            "model_type": model_type,
             "forecast_days": len(daily_forecast),
             "weekly_total_kwh": round(weekly_total_kwh, 3),
             "daily_forecast": daily_forecast,
