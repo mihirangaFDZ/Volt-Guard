@@ -5,7 +5,9 @@ from app.models.prediction_model import Prediction
 from datetime import datetime, timedelta
 from utils.jwt_handler import get_current_user
 import pandas as pd
+import numpy as np
 import sys
+import json
 from pathlib import Path
 
 # Add backend directory to path
@@ -13,6 +15,7 @@ backend_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from app.services.lstm_service import LSTMPredictor
+from app.services.behavioral_profile_service import BehavioralProfileService
 import threading
 
 router = APIRouter(
@@ -24,6 +27,82 @@ router = APIRouter(
 # Initialize LSTM service (lazy loading with thread safety)
 _lstm_service = None
 _lstm_lock = threading.Lock()
+
+# Cache for CI offsets loaded from lstm_evaluation.json
+_ci_cache: dict = {}
+
+# ---------------------------------------------------------------------------
+# LECO Block Tariff (Domestic, revised 12 June 2025)
+# ---------------------------------------------------------------------------
+# Block 01:   0 -  60 units  → Rs 12.75
+# Block 02:  61 -  90 units  → Rs 18.50
+# Block 03:  91 - 120 units  → Rs 24.00
+# Block 04: 121 - 180 units  → Rs 41.00
+# Block 05: 181 -1000 units  → Rs 61.00
+
+_LECO_BLOCKS = [
+    (60,  12.75),
+    (30,  18.50),   # 61-90
+    (30,  24.00),   # 91-120
+    (60,  41.00),   # 121-180
+    (820, 61.00),   # 181-1000
+]
+
+
+def calculate_leco_bill(monthly_units: float) -> dict:
+    """Calculate electricity bill using LECO domestic block tariff.
+
+    Returns a dict with total_bill, effective_rate, and per-block breakdown.
+    """
+    remaining = max(monthly_units, 0.0)
+    total_bill = 0.0
+    breakdown = []
+    cumulative = 0
+
+    for block_size, rate in _LECO_BLOCKS:
+        block_start = cumulative
+        units_in_block = min(remaining, block_size)
+        if units_in_block <= 0:
+            break
+        cost = units_in_block * rate
+        total_bill += cost
+        remaining -= units_in_block
+        cumulative += block_size
+        breakdown.append({
+            "block": f"{block_start + 1}-{block_start + block_size}",
+            "units": round(units_in_block, 2),
+            "rate": rate,
+            "cost": round(cost, 2),
+        })
+
+    effective_rate = total_bill / monthly_units if monthly_units > 0 else 0.0
+
+    return {
+        "monthly_units": round(monthly_units, 2),
+        "total_bill_lkr": round(total_bill, 2),
+        "effective_rate_per_kwh": round(effective_rate, 2),
+        "breakdown": breakdown,
+    }
+
+def _load_ci_offsets() -> dict:
+    """Load empirical confidence interval offsets from evaluation JSON."""
+    global _ci_cache
+    if _ci_cache:
+        return _ci_cache
+    eval_path = Path("models/lstm_evaluation.json")
+    if eval_path.exists():
+        try:
+            with open(eval_path) as f:
+                data = json.load(f)
+            _ci_cache = {
+                "lower_w": data.get("ci_90_lower_offset_w", -0.15),
+                "upper_w": data.get("ci_90_upper_offset_w", 0.15),
+            }
+        except Exception:
+            _ci_cache = {"lower_w": -0.15, "upper_w": 0.15}
+    else:
+        _ci_cache = {"lower_w": -0.15, "upper_w": 0.15}
+    return _ci_cache
 
 def get_lstm_service():
     """Lazy load LSTM service (thread-safe)"""
@@ -93,8 +172,8 @@ def predict_energy(
 
         df = pd.DataFrame(data)
         df = df.sort_values('received_at')
+        df = _add_time_features(df)
 
-        # Use LSTM for time series prediction
         predictions_df = lstm_service.predict(df.tail(50), steps_ahead=min(hours_ahead, 24))
         predictions = predictions_df['predicted_power_w'].tolist()
 
@@ -180,42 +259,9 @@ def weekly_forecast(
                 detail="Not enough recent data for a weekly forecast. Need at least 10 readings.",
             )
 
-        df = pd.DataFrame(data).sort_values("received_at")
+        df = _add_time_features(pd.DataFrame(data).sort_values("received_at"))
 
-        # LSTM predicts up to 24 steps at a time.
-        # We call it multiple times to cover 7 days (168 hours).
-        all_predictions = []
-        input_slice = df.tail(50)
-
-        # Predict in 24-hour chunks
-        for day_idx in range(7):
-            steps = min(24, 168 - len(all_predictions))
-            if steps <= 0:
-                break
-            try:
-                pred_df = lstm_service.predict(input_slice, steps_ahead=steps)
-                day_preds = pred_df["predicted_power_w"].tolist()
-                all_predictions.extend(day_preds)
-
-                # Build a pseudo-input for the next chunk using predictions
-                new_rows = []
-                base_time = datetime.utcnow() + timedelta(hours=len(all_predictions) - len(day_preds))
-                for i, pw in enumerate(day_preds):
-                    new_rows.append({
-                        "module": input_slice.iloc[-1].get("module", ""),
-                        "location": location or input_slice.iloc[-1].get("location", ""),
-                        "current_a": pw / 230.0,
-                        "power_w": pw,
-                        "received_at": base_time + timedelta(hours=i + 1),
-                    })
-                if new_rows:
-                    input_slice = pd.DataFrame(new_rows)
-            except Exception:
-                # If prediction fails on later days, use the average of existing predictions
-                avg_so_far = sum(all_predictions) / len(all_predictions) if all_predictions else 0
-                remaining = 168 - len(all_predictions)
-                all_predictions.extend([avg_so_far] * remaining)
-                break
+        all_predictions = _run_7day_lstm_forecast(df, lstm_service, location)
 
         # Aggregate into daily breakdown
         now = datetime.utcnow()
@@ -302,6 +348,20 @@ def _parse_energy_doc(doc):
     }
 
 
+def _add_time_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add time-based features required by the LSTM model."""
+    df = df.copy()
+    df["received_at"] = pd.to_datetime(df["received_at"])
+    df["hour"] = df["received_at"].dt.hour
+    df["day_of_week"] = df["received_at"].dt.dayofweek
+    df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
+    df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
+    df["day_sin"] = np.sin(2 * np.pi * df["day_of_week"] / 7)
+    df["day_cos"] = np.cos(2 * np.pi * df["day_of_week"] / 7)
+    df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
+    return df
+
+
 def _run_7day_lstm_forecast(df, lstm_service, location=None):
     """
     Run LSTM predictions for 7 days (168 hours) in 24-hour chunks.
@@ -310,7 +370,7 @@ def _run_7day_lstm_forecast(df, lstm_service, location=None):
         all_predictions: list of 168 predicted power_w values (hourly)
     """
     all_predictions = []
-    input_slice = df.tail(50)
+    input_slice = _add_time_features(df.tail(50))
 
     for day_idx in range(7):
         steps = min(24, 168 - len(all_predictions))
@@ -324,15 +384,16 @@ def _run_7day_lstm_forecast(df, lstm_service, location=None):
             new_rows = []
             base_time = datetime.utcnow() + timedelta(hours=len(all_predictions) - len(day_preds))
             for i, pw in enumerate(day_preds):
+                ts = base_time + timedelta(hours=i + 1)
                 new_rows.append({
                     "module": input_slice.iloc[-1].get("module", ""),
                     "location": location or input_slice.iloc[-1].get("location", ""),
                     "current_a": pw / 230.0,
                     "power_w": pw,
-                    "received_at": base_time + timedelta(hours=i + 1),
+                    "received_at": ts,
                 })
             if new_rows:
-                input_slice = pd.DataFrame(new_rows)
+                input_slice = _add_time_features(pd.DataFrame(new_rows))
         except Exception:
             avg_so_far = sum(all_predictions) / len(all_predictions) if all_predictions else 0
             remaining = 168 - len(all_predictions)
@@ -392,6 +453,50 @@ def _aggregate_daily(readings_data, start_date, num_days, is_historical=False):
     return daily
 
 
+def _forecast_from_behavioral_profile(profile: dict, now: datetime):
+    """
+    Build 7-day daily forecast from a device's behavioral profile.
+    Uses the hourly_profile (avg power per hour 0-23) to predict each day's usage.
+    """
+    hourly_profile = profile.get("hourly_profile") or []
+    if len(hourly_profile) == 0:
+        return None, 0.0
+
+    # Map hour -> avg_power_w (ensure all 24 hours)
+    hour_to_power = {int(p["hour"]): float(p.get("avg_power_w", 0)) for p in hourly_profile}
+    daily_kwh_from_profile = sum(hour_to_power.get(h, 0.0) for h in range(24)) / 1000.0  # W * 1hr = Wh -> kWh
+    avg_power_w = sum(hour_to_power.get(h, 0.0) for h in range(24)) / 24.0
+    peak_power_w = max(hour_to_power.get(h, 0.0) for h in range(24)) if hour_to_power else 0.0
+    peak_hour = max(range(24), key=lambda h: hour_to_power.get(h, 0.0)) if hour_to_power else 0
+
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    daily_forecast = []
+    weekly_total_kwh = 0.0
+    ci = _load_ci_offsets()
+    confidence_pct = 0.15  # ±15% for behavioral-based forecast
+
+    for day_offset in range(7):
+        target_date = now + timedelta(days=day_offset + 1)
+        day_name = day_names[target_date.weekday()]
+        day_kwh = daily_kwh_from_profile  # same pattern each day from profile
+        weekly_total_kwh += day_kwh
+        low_kwh = max(0.0, day_kwh * (1.0 - confidence_pct))
+        high_kwh = day_kwh * (1.0 + confidence_pct)
+        daily_forecast.append({
+            "day": day_name,
+            "date": target_date.strftime("%Y-%m-%d"),
+            "predicted_kwh": round(day_kwh, 3),
+            "avg_power_w": round(avg_power_w, 1),
+            "peak_power_w": round(peak_power_w, 1),
+            "peak_hour": peak_hour,
+            "confidence_low_kwh": round(low_kwh, 3),
+            "confidence_high_kwh": round(high_kwh, 3),
+            "hours_predicted": 24,
+        })
+
+    return daily_forecast, weekly_total_kwh
+
+
 # ---------------------------------------------------------------------------
 # Per-device forecast endpoint
 # ---------------------------------------------------------------------------
@@ -399,23 +504,15 @@ def _aggregate_daily(readings_data, start_date, num_days, is_historical=False):
 @router.get("/device-forecast/{device_id}")
 def device_forecast(
     device_id: str,
-    rate_per_kwh: float = Query(42.5, ge=0, description="Electricity rate in LKR per kWh"),
 ):
     """
     Get a 7-day energy forecast for a specific device.
 
     Returns forecast, historical comparison, risk level, and cost projections.
-    Uses the device's module_id to query its energy readings, then runs the
-    LSTM model for a 7-day (168-hour) prediction.
+    Uses the device's behavioral profile (hourly usage pattern) to predict future
+    usage for the next 7 days. Falls back to LSTM if no behavioral profile exists.
     """
     try:
-        lstm_service = get_lstm_service()
-        if lstm_service is None:
-            raise HTTPException(
-                status_code=503,
-                detail="LSTM model not trained yet. Please train models first.",
-            )
-
         # 1. Look up device
         device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
         if not device:
@@ -430,7 +527,6 @@ def device_forecast(
 
         device_name = device.get("device_name", device_id)
         location = device.get("location", "")
-
         now = datetime.utcnow()
 
         # 2. Get last 7 days of actual energy data for this device
@@ -484,45 +580,67 @@ def device_forecast(
         daily_prev = _aggregate_daily(prev_data, prev_start, 7, is_historical=True)
         last_week_total_kwh = sum(d["actual_kwh"] for d in daily_prev)
 
-        # 4. Run LSTM 7-day forecast
-        df = pd.DataFrame(recent_data).sort_values("received_at")
-        all_predictions = _run_7day_lstm_forecast(df, lstm_service, location)
-
-        # 5. Aggregate forecast into daily breakdown
-        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        daily_forecast = []
+        # 4. Prefer behavioral profile for 7-day forecast (future usage prediction from usage pattern)
+        daily_forecast = None
         weekly_total_kwh = 0.0
+        model_type = "lstm"
+        all_predictions = []  # used for hours_ahead when saving; set by LSTM or placeholder for behavioral
 
-        for day_offset in range(7):
-            start_hour = day_offset * 24
-            end_hour = min(start_hour + 24, len(all_predictions))
-            day_powers = all_predictions[start_hour:end_hour]
+        try:
+            profile_service = BehavioralProfileService()
+            profile = profile_service.build_profile(device_id, hours_back=168)
+            if profile and (profile.get("hourly_profile") or []):
+                daily_forecast, weekly_total_kwh = _forecast_from_behavioral_profile(profile, now)
+                if daily_forecast and len(daily_forecast) == 7 and weekly_total_kwh > 0:
+                    model_type = "behavioral_profile"
+                    all_predictions = [0] * 168  # 7 days * 24h for hours_ahead when saving
+        except Exception:
+            pass
 
-            if not day_powers:
-                continue
+        # 5. Fallback to LSTM if no behavioral forecast
+        if daily_forecast is None or model_type == "lstm":
+            lstm_service = get_lstm_service()
+            if lstm_service is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="LSTM model not trained yet and no behavioral profile available. "
+                           "Please train models or ensure device has enough history for a profile.",
+                )
+            df = pd.DataFrame(recent_data).sort_values("received_at")
+            all_predictions = _run_7day_lstm_forecast(df, lstm_service, location)
 
-            avg_power_w = sum(day_powers) / len(day_powers)
-            day_kwh = avg_power_w * len(day_powers) / 1000.0
-            weekly_total_kwh += day_kwh
+            day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            daily_forecast = []
+            weekly_total_kwh = 0.0
 
-            target_date = now + timedelta(days=day_offset + 1)
-            day_name = day_names[target_date.weekday()]
+            for day_offset in range(7):
+                start_hour = day_offset * 24
+                end_hour = min(start_hour + 24, len(all_predictions))
+                day_powers = all_predictions[start_hour:end_hour]
 
-            # Find peak hour
-            peak_idx = day_powers.index(max(day_powers))
-            peak_hour = peak_idx  # hour 0-23
+                if not day_powers:
+                    continue
 
-            daily_forecast.append({
-                "day": day_name,
-                "date": target_date.strftime("%Y-%m-%d"),
-                "predicted_kwh": round(day_kwh, 3),
-                "avg_power_w": round(avg_power_w, 1),
-                "peak_power_w": round(max(day_powers), 1),
-                "peak_hour": peak_hour,
-                "confidence_low_kwh": round(day_kwh * 0.85, 3),
-                "confidence_high_kwh": round(day_kwh * 1.15, 3),
-                "hours_predicted": len(day_powers),
-            })
+                avg_power_w = sum(day_powers) / len(day_powers)
+                day_kwh = avg_power_w * len(day_powers) / 1000.0
+                weekly_total_kwh += day_kwh
+
+                target_date = now + timedelta(days=day_offset + 1)
+                day_name = day_names[target_date.weekday()]
+                peak_idx = day_powers.index(max(day_powers))
+                peak_hour = peak_idx
+
+                daily_forecast.append({
+                    "day": day_name,
+                    "date": target_date.strftime("%Y-%m-%d"),
+                    "predicted_kwh": round(day_kwh, 3),
+                    "avg_power_w": round(avg_power_w, 1),
+                    "peak_power_w": round(max(day_powers), 1),
+                    "peak_hour": peak_hour,
+                    "confidence_low_kwh": round(max(0.0, (day_kwh * 1000 + _load_ci_offsets()["lower_w"]) / 1000), 3),
+                    "confidence_high_kwh": round((day_kwh * 1000 + _load_ci_offsets()["upper_w"]) / 1000, 3),
+                    "hours_predicted": len(day_powers),
+                })
 
         # 6. Comparison metrics
         historical_avg_daily = historical_total_kwh / 7.0 if historical_total_kwh > 0 else 0
@@ -555,11 +673,21 @@ def device_forecast(
             risk_level = "green"
             risk_reason = "Insufficient historical data for comparison."
 
-        # 7. Cost projections
-        weekly_cost_lkr = weekly_total_kwh * rate_per_kwh
-        monthly_projection_lkr = weekly_cost_lkr * (30.0 / 7.0)
-        last_week_cost_lkr = last_week_total_kwh * rate_per_kwh
-        savings_10pct = weekly_cost_lkr * 0.1
+        # 7. Cost projections using LECO block tariff
+        monthly_kwh = weekly_total_kwh * (30.0 / 7.0)
+        bill_info = calculate_leco_bill(monthly_kwh)
+        monthly_bill_lkr = bill_info["total_bill_lkr"]
+        weekly_cost_lkr = monthly_bill_lkr * (7.0 / 30.0)
+        effective_rate = bill_info["effective_rate_per_kwh"]
+
+        last_week_monthly = last_week_total_kwh * (30.0 / 7.0)
+        last_week_bill = calculate_leco_bill(last_week_monthly)
+        last_week_cost_lkr = last_week_bill["total_bill_lkr"] * (7.0 / 30.0)
+
+        # Savings if usage reduced by 10%
+        reduced_monthly = monthly_kwh * 0.9
+        reduced_bill = calculate_leco_bill(reduced_monthly)
+        savings_10pct = weekly_cost_lkr - reduced_bill["total_bill_lkr"] * (7.0 / 30.0)
 
         # Save forecast
         prediction_col.insert_one({
@@ -577,7 +705,7 @@ def device_forecast(
             "device_name": device_name,
             "module_id": module_id,
             "location": location,
-            "model_type": "lstm",
+            "model_type": model_type,
             "forecast_days": len(daily_forecast),
             "weekly_total_kwh": round(weekly_total_kwh, 3),
             "daily_forecast": daily_forecast,
@@ -592,11 +720,13 @@ def device_forecast(
                 "historical_avg_daily_kwh": round(historical_avg_daily, 3),
             },
             "cost": {
-                "rate_per_kwh_lkr": rate_per_kwh,
+                "tariff_type": "LECO_domestic_block",
+                "effective_rate_per_kwh": effective_rate,
                 "weekly_cost_lkr": round(weekly_cost_lkr, 2),
-                "monthly_projection_lkr": round(monthly_projection_lkr, 2),
+                "monthly_projection_lkr": round(monthly_bill_lkr, 2),
                 "last_week_cost_lkr": round(last_week_cost_lkr, 2),
                 "weekly_savings_if_reduced_10pct_lkr": round(savings_10pct, 2),
+                "tariff_breakdown": bill_info["breakdown"],
             },
             "generated_at": now.isoformat(),
         }
@@ -612,14 +742,12 @@ def device_forecast(
 # ---------------------------------------------------------------------------
 
 @router.get("/device-comparison")
-def device_comparison(
-    rate_per_kwh: float = Query(42.5, ge=0, description="Electricity rate in LKR per kWh"),
-):
+def device_comparison():
     """
     Get predicted weekly consumption for all devices, ranked by usage.
 
     Returns a ranked list of devices sorted by predicted weekly kWh (descending).
-    Useful for facility managers to quickly identify heavy consumers.
+    Uses LECO domestic block tariff for cost calculations.
     """
     try:
         lstm_service = get_lstm_service()
@@ -730,7 +858,6 @@ def device_comparison(
                     "device_name": device_name,
                     "location": location,
                     "predicted_weekly_kwh": round(weekly_kwh, 3),
-                    "weekly_cost_lkr": round(weekly_kwh * rate_per_kwh, 2),
                     "risk_level": risk,
                     "trend": trend,
                     "percent_change": round(pct, 2),
@@ -743,13 +870,29 @@ def device_comparison(
         device_results.sort(key=lambda d: d["predicted_weekly_kwh"], reverse=True)
 
         total_kwh = sum(d["predicted_weekly_kwh"] for d in device_results)
-        total_cost = sum(d["weekly_cost_lkr"] for d in device_results)
+
+        # Apply LECO block tariff to total household monthly consumption
+        total_monthly_kwh = total_kwh * (30.0 / 7.0)
+        bill_info = calculate_leco_bill(total_monthly_kwh)
+        total_monthly_bill = bill_info["total_bill_lkr"]
+        total_weekly_cost = total_monthly_bill * (7.0 / 30.0)
+        effective_rate = bill_info["effective_rate_per_kwh"]
+
+        # Distribute cost proportionally among devices
+        for d in device_results:
+            if total_kwh > 0:
+                d["weekly_cost_lkr"] = round(d["predicted_weekly_kwh"] / total_kwh * total_weekly_cost, 2)
+            else:
+                d["weekly_cost_lkr"] = 0.0
 
         return {
             "devices": device_results,
             "total_predicted_kwh": round(total_kwh, 3),
-            "total_weekly_cost_lkr": round(total_cost, 2),
-            "rate_per_kwh_lkr": rate_per_kwh,
+            "total_weekly_cost_lkr": round(total_weekly_cost, 2),
+            "total_monthly_bill_lkr": round(total_monthly_bill, 2),
+            "effective_rate_per_kwh": effective_rate,
+            "tariff_type": "LECO_domestic_block",
+            "tariff_breakdown": bill_info["breakdown"],
             "device_count": len(device_results),
             "generated_at": now.isoformat(),
         }
@@ -758,3 +901,129 @@ def device_comparison(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Device comparison failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Energy savings report endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/energy-savings-report/{device_id}")
+def energy_savings_report(
+    device_id: str,
+):
+    """
+    Measure actual week-over-week energy savings for a device.
+
+    Compares real energy consumption from the current week against the
+    previous week as a baseline, and checks how close the LSTM prediction
+    was to actual consumption. This provides a measurable research metric
+    for energy efficiency improvement.
+    """
+    try:
+        device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        module_id = device.get("module_id")
+        if not module_id:
+            raise HTTPException(status_code=422, detail="Device has no module_id — cannot query energy readings")
+
+        now = datetime.utcnow()
+        cutoff_7d = now - timedelta(hours=168)
+        cutoff_14d = now - timedelta(hours=336)
+
+        def fetch_kwh(start_dt, end_dt) -> float:
+            """Sum energy readings (power_w * hours) between two datetimes."""
+            cursor = energy_col.find(
+                {"module": module_id, "received_at": {"$gte": start_dt, "$lt": end_dt}},
+                {"power_w": 1, "received_at": 1, "_id": 0},
+            ).sort("received_at", 1)
+            docs = list(cursor)
+            if len(docs) < 2:
+                return 0.0
+            total_kwh = 0.0
+            for i in range(1, len(docs)):
+                try:
+                    t_prev = pd.Timestamp(docs[i - 1]["received_at"])
+                    t_curr = pd.Timestamp(docs[i]["received_at"])
+                    dt_hours = (t_curr - t_prev).total_seconds() / 3600.0
+                    if 0 < dt_hours < 2:  # ignore gaps > 2h (device offline)
+                        pw = float(docs[i - 1].get("power_w", 0) or 0)
+                        total_kwh += pw * dt_hours / 1000.0
+                except Exception:
+                    continue
+            return round(total_kwh, 4)
+
+        current_week_kwh = fetch_kwh(cutoff_7d, now)
+        previous_week_kwh = fetch_kwh(cutoff_14d, cutoff_7d)
+
+        if previous_week_kwh > 0:
+            savings_kwh = round(previous_week_kwh - current_week_kwh, 4)
+            savings_pct = round(savings_kwh / previous_week_kwh * 100, 2)
+        else:
+            savings_kwh = 0.0
+            savings_pct = 0.0
+
+        # Calculate savings using LECO block tariff
+        prev_monthly = previous_week_kwh * (30.0 / 7.0)
+        curr_monthly = current_week_kwh * (30.0 / 7.0)
+        prev_bill = calculate_leco_bill(prev_monthly)["total_bill_lkr"]
+        curr_bill = calculate_leco_bill(curr_monthly)["total_bill_lkr"]
+        savings_lkr = round(prev_bill - curr_bill, 2)
+
+        # LSTM prediction accuracy for current week
+        lstm_service = get_lstm_service()
+        lstm_predicted_kwh = None
+        prediction_error_pct = None
+        if lstm_service is not None:
+            try:
+                cursor = energy_col.find(
+                    {"module": module_id, "received_at": {"$gte": cutoff_7d}},
+                ).sort("received_at", -1).limit(2000)
+                recent_data = [_parse_energy_doc(d) for d in cursor]
+                recent_data = [r for r in recent_data if r]
+                if len(recent_data) >= 10:
+                    df = pd.DataFrame(recent_data).sort_values("received_at")
+                    location = device.get("location", "")
+                    all_predictions = _run_7day_lstm_forecast(df, lstm_service, location)
+                    lstm_predicted_kwh = 0.0
+                    for day_offset in range(7):
+                        start_h = day_offset * 24
+                        end_h = min(start_h + 24, len(all_predictions))
+                        day_powers = all_predictions[start_h:end_h]
+                        if day_powers:
+                            lstm_predicted_kwh += sum(day_powers) / len(day_powers) * len(day_powers) / 1000.0
+                    lstm_predicted_kwh = round(lstm_predicted_kwh, 4)
+                    if lstm_predicted_kwh and current_week_kwh:
+                        prediction_error_pct = round(
+                            abs(current_week_kwh - lstm_predicted_kwh) / max(current_week_kwh, 0.001) * 100, 2
+                        )
+            except Exception:
+                pass
+
+        return {
+            "device_id": device_id,
+            "device_name": device.get("device_name", device_id),
+            "location": device.get("location", ""),
+            "current_week_kwh": current_week_kwh,
+            "previous_week_kwh": previous_week_kwh,
+            "savings_kwh": savings_kwh,
+            "savings_pct": savings_pct,
+            "savings_lkr": savings_lkr,
+            "lstm_predicted_kwh": lstm_predicted_kwh,
+            "prediction_vs_actual_pct_error": prediction_error_pct,
+            "tariff_type": "LECO_domestic_block",
+            "measurement_method": "week-over-week comparison",
+            "measurement_period": {
+                "current_week_start": cutoff_7d.isoformat(),
+                "current_week_end": now.isoformat(),
+                "previous_week_start": cutoff_14d.isoformat(),
+                "previous_week_end": cutoff_7d.isoformat(),
+            },
+            "generated_at": now.isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Energy savings report failed: {str(e)}")

@@ -237,6 +237,7 @@ def detect_anomalies(
                     }
                     anomalies_list.append(anomaly_doc)
                     anomaly_col.insert_one(anomaly_doc)
+                    anomaly_doc.pop("_id", None)  # insert_one mutates dict in-place
 
         # Run Autoencoder
         if method in ("autoencoder", "both"):
@@ -265,6 +266,7 @@ def detect_anomalies(
                     }
                     anomalies_list.append(anomaly_doc)
                     anomaly_col.insert_one(anomaly_doc)
+                    anomaly_doc.pop("_id", None)  # insert_one mutates dict in-place
 
         return {
             "total_detected": len(anomalies_list),
@@ -330,3 +332,110 @@ def get_anomaly_stats(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Anomaly labeling endpoints (human ground-truth collection)
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel
+from bson import ObjectId
+
+
+class AnomalyLabel(BaseModel):
+    label: str  # "true_positive" | "false_positive" | "unsure"
+    labeled_by: Optional[str] = None
+
+
+@router.post("/{anomaly_doc_id}/label")
+def label_anomaly(anomaly_doc_id: str, body: AnomalyLabel):
+    """
+    Attach a human ground-truth label to an anomaly document.
+
+    This enables precision/recall estimation from real labeled data.
+    Labels: "true_positive", "false_positive", "unsure"
+    """
+    valid_labels = {"true_positive", "false_positive", "unsure"}
+    if body.label not in valid_labels:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid label '{body.label}'. Must be one of: {valid_labels}",
+        )
+
+    # Support lookup by MongoDB _id, stored anomaly_doc_id field, or detected_at timestamp
+    query = None
+    try:
+        query = {"_id": ObjectId(anomaly_doc_id)}
+    except Exception:
+        # Try as a direct field value first, then as detected_at timestamp
+        query = {"$or": [
+            {"anomaly_doc_id": anomaly_doc_id},
+            {"detected_at": anomaly_doc_id},
+        ]}
+
+    result = anomaly_col.update_one(
+        query,
+        {
+            "$set": {
+                "human_label": body.label,
+                "labeled_at": datetime.utcnow().isoformat(),
+                "labeled_by": body.labeled_by or "user",
+            }
+        },
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Anomaly document not found")
+
+    return {"status": "labeled", "anomaly_doc_id": anomaly_doc_id, "label": body.label}
+
+
+@router.get("/precision-recall-estimate")
+def precision_recall_estimate():
+    """
+    Estimate anomaly detection precision from human-labeled anomaly documents.
+
+    Only anomaly documents with a 'human_label' field are considered.
+    Precision = true_positives / (true_positives + false_positives).
+    Recall cannot be computed from flagged-only data (denominator unknown).
+    Returns clearly annotated results.
+    """
+    labeled = list(anomaly_col.find(
+        {"human_label": {"$exists": True}},
+        {"_id": 0, "human_label": 1, "detection_method": 1},
+    ))
+
+    if not labeled:
+        return {
+            "status": "no_labeled_data",
+            "note": "Label anomalies via POST /anomalies/{id}/label to build this estimate.",
+        }
+
+    tp = sum(1 for d in labeled if d["human_label"] == "true_positive")
+    fp = sum(1 for d in labeled if d["human_label"] == "false_positive")
+    unsure = sum(1 for d in labeled if d["human_label"] == "unsure")
+    total = len(labeled)
+
+    precision = round(tp / (tp + fp), 4) if (tp + fp) > 0 else None
+
+    # Breakdown by detection method
+    by_method: dict = {}
+    for doc in labeled:
+        method = doc.get("detection_method", "unknown")
+        if method not in by_method:
+            by_method[method] = {"true_positive": 0, "false_positive": 0, "unsure": 0}
+        by_method[method][doc["human_label"]] += 1
+
+    return {
+        "status": "estimated",
+        "labeled_count": total,
+        "true_positives": tp,
+        "false_positives": fp,
+        "unsure": unsure,
+        "estimated_precision": precision,
+        "by_method": by_method,
+        "recall_note": (
+            "Recall cannot be computed from flagged-only data (total real anomalies unknown). "
+            "See GET /model-evaluation/anomaly-metrics for synthetic-injection precision/recall."
+        ),
+    }

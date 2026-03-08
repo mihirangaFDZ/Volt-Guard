@@ -43,6 +43,9 @@ class BehavioralProfileService {
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
+  /// Energy vampires endpoint can be slow (168h analysis). Use longer timeout.
+  static const Duration _energyVampiresTimeout = Duration(seconds: 60);
+
   Future<Map<String, dynamic>> fetchEnergyVampires({
     int hoursBack = 168,
     String? location,
@@ -56,7 +59,7 @@ class BehavioralProfileService {
       '${ApiConfig.baseUrl}${ApiConfig.behavioralProfilesEndpoint}/energy-vampires',
     ).replace(queryParameters: params);
 
-    final resp = await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
+    final resp = await http.get(uri, headers: headers).timeout(_energyVampiresTimeout);
     _ensureOk(resp);
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
