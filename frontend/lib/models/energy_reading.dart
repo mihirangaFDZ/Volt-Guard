@@ -33,7 +33,18 @@ class EnergyReading {
     if (tsString != null) {
       final DateTime? parsed = DateTime.tryParse(tsString);
       if (parsed != null) {
-        parsedTimestamp = parsed.toUtc();
+        // Backend sends UTC (DateTime.utcnow()). If no 'Z', parser may treat as local — force UTC.
+        parsedTimestamp = parsed.isUtc
+            ? parsed
+            : DateTime.utc(
+                parsed.year,
+                parsed.month,
+                parsed.day,
+                parsed.hour,
+                parsed.minute,
+                parsed.second,
+                parsed.millisecond,
+              );
       }
     }
 

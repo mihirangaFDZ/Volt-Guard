@@ -1,15 +1,15 @@
 {
-  "rmse": 0.0243,
-  "mae": 0.0144,
-  "r2": 0.6781,
-  "train_size": 3297,
-  "test_size": 825,
-  "baseline_rmse_last_value": 0.027,
-  "baseline_rmse_rolling": 0.0437,
-  "improvement_vs_best_baseline_pct": 9.99,
-  "ci_90_lower_offset_w": -0.0401,
-  "ci_90_upper_offset_w": 0.0399,
-  "epochs_trained": 43,
+  "rmse": 0.0476,
+  "mae": 0.0245,
+  "r2": 0.7469,
+  "train_size": 17676,
+  "test_size": 4419,
+  "baseline_rmse_last_value": 0.0594,
+  "baseline_rmse_rolling": 0.0928,
+  "improvement_vs_best_baseline_pct": 19.91,
+  "ci_90_lower_offset_w": -0.0794,
+  "ci_90_upper_offset_w": 0.077,
+  "epochs_trained": 45,
   "sequence_length": 48,
   "feature_columns": [
     "current_a",
@@ -21,5 +21,5 @@
     "is_weekend"
   ],
   "split_method": "chronological_80_20",
-  "trained_at": "2026-03-07T21:24:41.624595+00:00"
+  "trained_at": "2026-03-08T15:19:26.756632+00:00"
 }

@@ -63,8 +63,6 @@ class _DevicesPageState extends State<DevicesPage> {
   Map<String, dynamic>? _deviceForecast;
   bool _forecastLoading = false;
   String? _forecastError;
-  bool _scenarioReducedUsage = false;
-
   // Device comparison state
   Map<String, dynamic>? _deviceComparison;
   bool _comparisonLoading = false;
@@ -72,25 +70,15 @@ class _DevicesPageState extends State<DevicesPage> {
 
   // Anomaly detection state
   final AnomalyAlertService _anomalyService = AnomalyAlertService();
+  final ModelEvaluationService _evalService = ModelEvaluationService();
   Map<String, Map<String, dynamic>> _deviceAnomalies = {};
   bool _anomalyLoading = false;
   String? _anomalyError;
 
-  // Research metrics state
-  final ModelEvaluationService _evalService = ModelEvaluationService();
-  Map<String, dynamic>? _modelComparison;
-  Map<String, dynamic>? _anomalyMetrics;
-  Map<String, dynamic>? _dataQuality;
-  bool _researchMetricsLoading = false;
-  String? _researchMetricsError;
-  bool _researchMetricsExpanded = false;
-
   @override
   void initState() {
     super.initState();
-    _loadDevices();
-    _loadEnergyVampires();
-    _loadResearchMetrics();
+    _loadDevices(); // Energy vampires load in background after list is shown
   }
 
   Future<void> _loadDevices() async {
@@ -107,6 +95,7 @@ class _DevicesPageState extends State<DevicesPage> {
       setState(() {
         _devices = devices;
         _totalDevices = devices.length;
+        _loading = false; // Show list immediately
         // Initialize time ranges to 24h and relay states
         for (final device in devices) {
           final deviceId = device['device_id'] as String? ?? '';
@@ -116,19 +105,13 @@ class _DevicesPageState extends State<DevicesPage> {
         }
       });
 
-      // Load summary statistics and anomaly detection
-      await Future.wait([
-        _loadSummaryStatistics(),
-        _loadAnomalyDetection(),
-      ]);
-
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _loadingSummary = false;
+      // Load summary (faults only) and anomaly in background — don't block list
+      _loadSummaryStatistics().then((_) {
+        if (mounted) setState(() => _loadingSummary = false);
       });
+      _loadAnomalyDetection();
 
-      // Auto-select first device with module_id for forecast
+      // Forecast, comparison, and energy vampires in background
       final devicesWithModule = _devices
           .where((d) =>
               d['module_id'] != null && (d['module_id'] as String).isNotEmpty)
@@ -141,6 +124,7 @@ class _DevicesPageState extends State<DevicesPage> {
         }
         _loadDeviceComparison();
       }
+      _loadEnergyVampires();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -238,37 +222,13 @@ class _DevicesPageState extends State<DevicesPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      final String message = e.toString().contains('TimeoutException') ||
+              e.toString().contains('timed out')
+          ? 'Request timed out. Tap refresh to try again.'
+          : 'Unable to load energy vampires: $e';
       setState(() {
-        _vampiresError = 'Unable to load energy vampires: $e';
+        _vampiresError = message;
         _vampiresLoading = false;
-      });
-    }
-  }
-
-  Future<void> _loadResearchMetrics() async {
-    if (!mounted) return;
-    setState(() {
-      _researchMetricsLoading = true;
-      _researchMetricsError = null;
-    });
-    try {
-      final results = await Future.wait([
-        _evalService.fetchModelComparison(),
-        _evalService.fetchAnomalyMetrics(),
-        _evalService.fetchDataQuality(),
-      ]);
-      if (!mounted) return;
-      setState(() {
-        _modelComparison = results[0];
-        _anomalyMetrics = results[1];
-        _dataQuality = results[2];
-        _researchMetricsLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _researchMetricsError = 'Unable to load model metrics: $e';
-        _researchMetricsLoading = false;
       });
     }
   }
@@ -344,46 +304,14 @@ class _DevicesPageState extends State<DevicesPage> {
 
   Future<void> _loadSummaryStatistics() async {
     try {
-      // Fetch active faults
+      // Single API call: fetch active faults only (no per-device energy calls on load)
       final activeFaults = await _faultService.fetchActive(limit: 100);
-
-      // Check active devices by fetching latest readings for each device
-      int activeCount = 0;
-      final now = DateTime.now();
-
-      for (final device in _devices) {
-        final deviceId = device['device_id'] as String? ?? '';
-        try {
-          // Fetch just the latest reading (limit=1) to check if device is active
-          final data = await _deviceService.fetchDeviceEnergyReadings(
-            deviceId,
-            limit: 1,
-            hours: 1, // Check last hour
-          );
-          final readings = data['readings'] as List<EnergyReading>;
-          if (readings.isNotEmpty) {
-            final lastReading = readings.first;
-            final timeDiff = now.difference(lastReading.receivedAt);
-            _deviceLastReadings[deviceId] = lastReading.receivedAt;
-
-            // Active if last reading is within the last 10 seconds
-            if (timeDiff.inSeconds < 10) {
-              activeCount++;
-            }
-          }
-        } catch (e) {
-          // If error fetching, consider device inactive
-          _deviceLastReadings[deviceId] = null;
-        }
-      }
-
       if (!mounted) return;
       setState(() {
-        _activeDevices = activeCount;
         _totalFaults = activeFaults.length;
+        // Active count stays 0 until user expands devices (_recalculateActiveDevices)
       });
     } catch (e) {
-      // Silently fail - summary is not critical
       if (mounted) {
         setState(() {
           _activeDevices = 0;
@@ -423,6 +351,20 @@ class _DevicesPageState extends State<DevicesPage> {
     }
   }
 
+  /// Format kWh for display; clamp to reasonable range to avoid absurd values.
+  String _formatReasonableKwh(double value, {double maxKwh = 9999}) {
+    if (value < 0) return '0 kWh';
+    if (value > maxKwh) return '${maxKwh.toInt()}+ kWh';
+    return '${value.toStringAsFixed(2)} kWh';
+  }
+
+  /// Format cost in LKR for display; clamp to reasonable range.
+  String _formatReasonableCost(double value, {double maxLkr = 999999}) {
+    if (value < 0) return '0';
+    if (value > maxLkr) return '${maxLkr.toInt()}+';
+    return value.toStringAsFixed(0);
+  }
+
   String _getTimeRangeLabel(TimeRange range) {
     switch (range) {
       case TimeRange.hours6:
@@ -439,6 +381,25 @@ class _DevicesPageState extends State<DevicesPage> {
       _loadDeviceReadings(deviceId),
       _loadDeviceFaults(deviceId),
     ]);
+    if (!mounted) return;
+    // If model detected abnormal power, backend may have turned relay OFF
+    try {
+      final result = await _deviceService.checkAnomalyShutoff(deviceId);
+      if (result['auto_shutoff'] == true && mounted) {
+        setState(() => _relayStates[deviceId] = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result['reason'] as String? ??
+                  'Device turned off due to abnormal power consumption.',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (_) {
+      // Non-critical: ignore if endpoint fails
+    }
   }
 
   Future<void> _loadDeviceReadings(String deviceId) async {
@@ -520,7 +481,7 @@ class _DevicesPageState extends State<DevicesPage> {
     for (final device in _devices) {
       final deviceId = device['device_id'] as String? ?? '';
       final lastReading = _deviceLastReadings[deviceId];
-      if (lastReading != null && now.difference(lastReading).inSeconds < 10) {
+      if (lastReading != null && now.difference(lastReading).inSeconds <= 30) {
         activeCount++;
       }
     }
@@ -813,8 +774,6 @@ class _DevicesPageState extends State<DevicesPage> {
         // Summary Statistics Card
         _buildSummaryCard(),
         const SizedBox(height: 16),
-        _buildResearchMetricsPanel(),
-        const SizedBox(height: 16),
         _buildEnergyForecastPanel(),
         const SizedBox(height: 16),
         _buildDeviceComparisonCard(),
@@ -823,324 +782,6 @@ class _DevicesPageState extends State<DevicesPage> {
         const SizedBox(height: 16),
         ..._devices.map((device) => _buildDeviceCard(device)),
       ],
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Research Metrics Panel
-  // ---------------------------------------------------------------------------
-
-  Widget _buildResearchMetricsPanel() {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    // Header color for research card
-    final accentColor = isDark ? const Color(0xFF7C4DFF) : const Color(0xFF6200EE);
-
-    if (_researchMetricsLoading) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(children: [
-            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-            const SizedBox(width: 12),
-            Text('Loading AI model metrics...', style: TextStyle(color: colorScheme.onSurface.withOpacity(0.6))),
-          ]),
-        ),
-      );
-    }
-
-    if (_researchMetricsError != null && _modelComparison == null) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(children: [
-            Icon(Icons.info_outline, color: Colors.orange[700], size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Model metrics unavailable — retrain the LSTM to generate evaluation data.',
-                style: TextStyle(fontSize: 12, color: colorScheme.onSurface.withOpacity(0.7)),
-              ),
-            ),
-          ]),
-        ),
-      );
-    }
-
-    final isMissing = _modelComparison == null || _modelComparison!['status'] == 'not_evaluated';
-
-    return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Title row
-            Row(
-              children: [
-                Icon(Icons.analytics, color: accentColor, size: 22),
-                const SizedBox(width: 8),
-                Text(
-                  'AI Model Performance',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: colorScheme.onSurface),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: accentColor.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text('Research Metrics', style: TextStyle(fontSize: 10, color: accentColor, fontWeight: FontWeight.w600)),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: Icon(_researchMetricsExpanded ? Icons.expand_less : Icons.expand_more, size: 20),
-                  onPressed: () => setState(() => _researchMetricsExpanded = !_researchMetricsExpanded),
-                  tooltip: 'Toggle details',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            if (isMissing) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.withOpacity(0.3)),
-                ),
-                child: Row(children: [
-                  Icon(Icons.warning_amber, color: Colors.orange[700], size: 16),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(
-                    'Retrain the LSTM model to generate evaluation metrics. '
-                    'Trigger POST /ml-training/train-all.',
-                    style: TextStyle(fontSize: 12, color: colorScheme.onSurface.withOpacity(0.8)),
-                  )),
-                ]),
-              ),
-            ] else ...[
-              // --- Section A: LSTM Metrics ---
-              _buildMetricsSectionA(colorScheme),
-
-              if (_researchMetricsExpanded) ...[
-                const SizedBox(height: 12),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-
-                // --- Section B: Baseline Comparison ---
-                _buildMetricsSectionB(colorScheme, accentColor),
-
-                const SizedBox(height: 12),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-
-                // --- Section C: Anomaly Detection ---
-                _buildMetricsSectionC(colorScheme),
-
-                const SizedBox(height: 12),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-
-                // --- Section D: Data Quality ---
-                _buildMetricsSectionD(colorScheme),
-              ],
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMetricsSectionA(ColorScheme cs) {
-    final comp = _modelComparison;
-    if (comp == null || comp['comparison'] == null) return const SizedBox();
-    final lstm = (comp['comparison'] as List).firstWhere(
-      (c) => (c as Map)['highlight'] == true, orElse: () => null);
-    if (lstm == null) return const SizedBox();
-    final rmse = (lstm['rmse_w'] as num?)?.toDouble();
-
-    // Fetch MAE and R² from lstm metrics if available (model comparison doesn't carry them)
-    // We'll display what we have
-    Color rmseColor = Colors.grey;
-    if (rmse != null) {
-      rmseColor = rmse < 5 ? Colors.green : (rmse < 20 ? Colors.orange : Colors.red);
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('LSTM Prediction Model', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.7))),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _metricChip('RMSE', rmse != null ? '${rmse.toStringAsFixed(2)} W' : 'N/A', rmseColor),
-            const SizedBox(width: 8),
-            if (comp['improvement_vs_best_baseline_pct'] != null)
-              _metricChip(
-                'vs Baseline',
-                '+${(comp['improvement_vs_best_baseline_pct'] as num).toStringAsFixed(1)}%',
-                Colors.green,
-              ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Split: 80% train / 20% test (chronological)',
-          style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5)),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMetricsSectionB(ColorScheme cs, Color accent) {
-    final comp = _modelComparison;
-    if (comp == null || comp['comparison'] == null) return const SizedBox();
-    final rows = comp['comparison'] as List;
-    final improvement = comp['improvement_vs_best_baseline_pct'];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Baseline Comparison (RMSE)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.7))),
-        const SizedBox(height: 8),
-        ...rows.map((r) {
-          final m = r as Map;
-          final isHighlight = m['highlight'] == true;
-          final rmseVal = (m['rmse_w'] as num?)?.toDouble();
-          return Container(
-            margin: const EdgeInsets.only(bottom: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: isHighlight ? accent.withOpacity(0.10) : Colors.transparent,
-              borderRadius: BorderRadius.circular(6),
-              border: isHighlight ? Border.all(color: accent.withOpacity(0.4)) : null,
-            ),
-            child: Row(children: [
-              if (isHighlight) Icon(Icons.star, size: 12, color: accent),
-              if (isHighlight) const SizedBox(width: 4),
-              Expanded(child: Text(m['model'] as String, style: TextStyle(fontSize: 12, fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal))),
-              Text(rmseVal != null ? '${rmseVal.toStringAsFixed(2)} W' : 'N/A',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isHighlight ? accent : cs.onSurface)),
-            ]),
-          );
-        }),
-        if (improvement != null) ...[
-          const SizedBox(height: 6),
-          Text(
-            'LSTM is ${(improvement as num).toStringAsFixed(1)}% more accurate than the best baseline.',
-            style: TextStyle(fontSize: 11, color: Colors.green[700], fontWeight: FontWeight.w600),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildMetricsSectionC(ColorScheme cs) {
-    final anomaly = _anomalyMetrics;
-    if (anomaly == null) return const SizedBox();
-
-    if (anomaly['status'] == 'not_evaluated') {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Anomaly Detection', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.7))),
-          const SizedBox(height: 6),
-          Text('Run backend/scripts/evaluate_anomaly_detection.py to compute precision/recall.',
-            style: TextStyle(fontSize: 11, color: cs.onSurface.withOpacity(0.5))),
-        ],
-      );
-    }
-
-    Widget modelRow(String name, Map<String, dynamic> m) {
-      final p = (m['precision'] as num?)?.toDouble();
-      final r = (m['recall'] as num?)?.toDouble();
-      final f = (m['f1'] as num?)?.toDouble();
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(name, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.8))),
-          const SizedBox(height: 4),
-          Row(children: [
-            _metricChip('P', p != null ? p.toStringAsFixed(2) : 'N/A', Colors.blue),
-            const SizedBox(width: 6),
-            _metricChip('R', r != null ? r.toStringAsFixed(2) : 'N/A', Colors.teal),
-            const SizedBox(width: 6),
-            _metricChip('F1', f != null ? f.toStringAsFixed(2) : 'N/A', Colors.purple),
-          ]),
-        ]),
-      );
-    }
-
-    final iso = anomaly['isolation_forest'];
-    final ae = anomaly['autoencoder'];
-    final method = anomaly['injection_method'] as String? ?? '';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Anomaly Detection', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.7))),
-        const SizedBox(height: 8),
-        if (iso != null && iso is Map) modelRow('Isolation Forest', Map<String, dynamic>.from(iso as Map)),
-        if (ae != null && ae is Map) modelRow('Autoencoder', Map<String, dynamic>.from(ae as Map)),
-        if (method.isNotEmpty)
-          Text('Method: $method', style: TextStyle(fontSize: 10, color: cs.onSurface.withOpacity(0.45))),
-      ],
-    );
-  }
-
-  Widget _buildMetricsSectionD(ColorScheme cs) {
-    final dq = _dataQuality;
-    if (dq == null || dq['status'] == 'metadata_not_found') return const SizedBox();
-
-    final chips = <String>[];
-    if (dq['total_records'] != null) chips.add('${dq["total_records"]} records');
-    if (dq['time_window_hours'] != null) chips.add('${dq["time_window_hours"]}h window');
-    if (dq['feature_count'] != null) chips.add('${dq["feature_count"]} features');
-    if (dq['occupancy_rate_pct'] != null) {
-      final rate = (dq['occupancy_rate_pct'] as num).toDouble();
-      chips.add('${(rate * (rate < 1 ? 100 : 1)).toStringAsFixed(1)}% occupancy');
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Dataset Quality', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onSurface.withOpacity(0.7))),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: chips.map((c) => Chip(
-            label: Text(c, style: const TextStyle(fontSize: 11)),
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          )).toList(),
-        ),
-      ],
-    );
-  }
-
-  Widget _metricChip(String label, String value, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        children: [
-          Text(label, style: TextStyle(fontSize: 9, color: color.withOpacity(0.8), fontWeight: FontWeight.w600)),
-          Text(value, style: TextStyle(fontSize: 13, color: color, fontWeight: FontWeight.bold)),
-        ],
-      ),
     );
   }
 
@@ -1260,8 +901,6 @@ class _DevicesPageState extends State<DevicesPage> {
               _buildForecastChart(),
               const SizedBox(height: 16),
               _buildCostProjection(),
-              const SizedBox(height: 16),
-              _buildScenarioSimulation(),
             ],
 
             // Empty state
@@ -1328,10 +967,7 @@ class _DevicesPageState extends State<DevicesPage> {
       }).toList(),
       onChanged: (newId) {
         if (newId != null && newId != _forecastSelectedDeviceId) {
-          setState(() {
-            _forecastSelectedDeviceId = newId;
-            _scenarioReducedUsage = false;
-          });
+          setState(() => _forecastSelectedDeviceId = newId);
           _loadDeviceForecast(newId);
         }
       },
@@ -1379,8 +1015,6 @@ class _DevicesPageState extends State<DevicesPage> {
         trendIcon = Icons.trending_flat;
         trendColor = Colors.blue;
     }
-
-    final effectiveKwh = _scenarioReducedUsage ? weeklyKwh * 0.9 : weeklyKwh;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1448,7 +1082,7 @@ class _DevicesPageState extends State<DevicesPage> {
                     Icon(Icons.bolt, color: Colors.indigo.shade600, size: 22),
                     const SizedBox(height: 4),
                     Text(
-                      '${effectiveKwh.toStringAsFixed(1)} kWh',
+                      '${weeklyKwh.toStringAsFixed(1)} kWh',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -1576,8 +1210,7 @@ class _DevicesPageState extends State<DevicesPage> {
     }
     for (int i = 0; i < dailyForecast.length; i++) {
       final day = dailyForecast[i] as Map<String, dynamic>;
-      double kwh = (day['predicted_kwh'] as num).toDouble();
-      if (_scenarioReducedUsage) kwh *= 0.9;
+      final kwh = (day['predicted_kwh'] as num).toDouble();
       forecastSpots.add(FlSpot((dailyHistorical.length + i).toDouble(), kwh));
     }
 
@@ -1586,12 +1219,8 @@ class _DevicesPageState extends State<DevicesPage> {
     final confHighSpots = <FlSpot>[];
     for (int i = 0; i < dailyForecast.length; i++) {
       final day = dailyForecast[i] as Map<String, dynamic>;
-      double low = (day['confidence_low_kwh'] as num).toDouble();
-      double high = (day['confidence_high_kwh'] as num).toDouble();
-      if (_scenarioReducedUsage) {
-        low *= 0.9;
-        high *= 0.9;
-      }
+      final low = (day['confidence_low_kwh'] as num).toDouble();
+      final high = (day['confidence_high_kwh'] as num).toDouble();
       final x = (dailyHistorical.length + i).toDouble();
       confLowSpots.add(FlSpot(x, low));
       confHighSpots.add(FlSpot(x, high));
@@ -1792,14 +1421,10 @@ class _DevicesPageState extends State<DevicesPage> {
                               (day['confidence_low_kwh'] as num).toDouble();
                           final confHigh =
                               (day['confidence_high_kwh'] as num).toDouble();
-                          final effectLow =
-                              _scenarioReducedUsage ? confLow * 0.9 : confLow;
-                          final effectHigh =
-                              _scenarioReducedUsage ? confHigh * 0.9 : confHigh;
                           return LineTooltipItem(
                             '${spot.y.toStringAsFixed(1)} kWh\n'
                             'Peak: ${peakHour.toString().padLeft(2, "0")}:00\n'
-                            'Range: ${effectLow.toStringAsFixed(1)}-${effectHigh.toStringAsFixed(1)}',
+                            'Range: ${confLow.toStringAsFixed(1)}-${confHigh.toStringAsFixed(1)}',
                             const TextStyle(color: Colors.white, fontSize: 11),
                           );
                         }
@@ -1898,17 +1523,9 @@ class _DevicesPageState extends State<DevicesPage> {
     final weeklyLkr = (cost['weekly_cost_lkr'] as num).toDouble();
     final monthlyLkr = (cost['monthly_projection_lkr'] as num).toDouble();
     final lastWeekLkr = (cost['last_week_cost_lkr'] as num).toDouble();
-    final savingsLkr =
-        (cost['weekly_savings_if_reduced_10pct_lkr'] as num).toDouble();
-
-    // When scenario is on, use the block-tariff-aware savings from backend
-    final effectiveWeekly = _scenarioReducedUsage ? weeklyLkr - savingsLkr : weeklyLkr;
-    final effectiveMonthly =
-        _scenarioReducedUsage ? monthlyLkr - savingsLkr * (30.0 / 7.0) : monthlyLkr;
-
     // Determine monthly change message
     final monthlyChange = lastWeekLkr > 0
-        ? ((effectiveWeekly - lastWeekLkr) / lastWeekLkr * 100)
+        ? ((weeklyLkr - lastWeekLkr) / lastWeekLkr * 100)
         : 0.0;
 
     return Container(
@@ -1945,7 +1562,7 @@ class _DevicesPageState extends State<DevicesPage> {
               Expanded(
                 child: _buildCostItem(
                   'Weekly Estimate',
-                  'Rs. ${effectiveWeekly.toStringAsFixed(0)}',
+                  'Rs. ${weeklyLkr.toStringAsFixed(0)}',
                   Colors.green.shade700,
                 ),
               ),
@@ -1953,7 +1570,7 @@ class _DevicesPageState extends State<DevicesPage> {
               Expanded(
                 child: _buildCostItem(
                   'Monthly Bill',
-                  'Rs. ${effectiveMonthly.toStringAsFixed(0)}',
+                  'Rs. ${monthlyLkr.toStringAsFixed(0)}',
                   Colors.blue.shade700,
                 ),
               ),
@@ -2004,30 +1621,6 @@ class _DevicesPageState extends State<DevicesPage> {
               ),
             ),
           ],
-          if (_scenarioReducedUsage) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.tertiaryContainer,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.savings, color: Colors.green.shade700, size: 16),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Potential savings: Rs. ${savingsLkr.toStringAsFixed(0)}/week',
-                    style: TextStyle(
-                      color: Colors.green.shade800,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -2057,35 +1650,6 @@ class _DevicesPageState extends State<DevicesPage> {
             textAlign: TextAlign.center,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildScenarioSimulation() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.tertiaryContainer,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        title: const Text(
-          'What if usage reduced by 10%?',
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          _scenarioReducedUsage
-              ? 'Showing adjusted forecast with 10% reduction'
-              : 'Toggle to see potential savings',
-          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-        ),
-        value: _scenarioReducedUsage,
-        onChanged: (val) => setState(() => _scenarioReducedUsage = val),
-        secondary: Icon(Icons.science, color: Colors.amber.shade800, size: 22),
-        activeColor: Colors.amber.shade700,
       ),
     );
   }
@@ -2179,7 +1743,7 @@ class _DevicesPageState extends State<DevicesPage> {
 
             // Content
             if (_deviceComparison != null && !_comparisonLoading) ...[
-              // Total summary
+              // Total summary (clamp to reasonable display range)
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
@@ -2192,7 +1756,7 @@ class _DevicesPageState extends State<DevicesPage> {
                     Column(
                       children: [
                         Text(
-                          '${(_deviceComparison!['total_predicted_kwh'] as num).toStringAsFixed(1)} kWh',
+                          _formatReasonableKwh((_deviceComparison!['total_predicted_kwh'] as num).toDouble(), maxKwh: 9999),
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
@@ -2211,7 +1775,7 @@ class _DevicesPageState extends State<DevicesPage> {
                     Column(
                       children: [
                         Text(
-                          'Rs. ${(_deviceComparison!['total_weekly_cost_lkr'] as num).toStringAsFixed(0)}',
+                          'Rs. ${_formatReasonableCost((_deviceComparison!['total_weekly_cost_lkr'] as num).toDouble(), maxLkr: 999999)}',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
@@ -2230,7 +1794,7 @@ class _DevicesPageState extends State<DevicesPage> {
                     Column(
                       children: [
                         Text(
-                          'Rs. ${(_deviceComparison!['total_monthly_bill_lkr'] as num?)?.toStringAsFixed(0) ?? '-'}',
+                          'Rs. ${_formatReasonableCost((_deviceComparison!['total_monthly_bill_lkr'] as num?)?.toDouble() ?? 0, maxLkr: 999999)}',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
@@ -2277,8 +1841,9 @@ class _DevicesPageState extends State<DevicesPage> {
                 final device = entry.value as Map<String, dynamic>;
                 final name = device['device_name'] as String? ??
                     device['device_id'] as String;
-                final kwh = (device['predicted_weekly_kwh'] as num).toDouble();
-                final costLkr = (device['weekly_cost_lkr'] as num).toDouble();
+                // Clamp to reasonable range for display (per-device)
+                final kwh = ((device['predicted_weekly_kwh'] as num).toDouble()).clamp(0.0, 500.0);
+                final costLkr = ((device['weekly_cost_lkr'] as num).toDouble()).clamp(0.0, 50000.0);
                 final risk = device['risk_level'] as String? ?? 'green';
                 final pct = (device['percent_change'] as num?)?.toDouble() ?? 0;
                 final trendStr = device['trend'] as String? ?? 'stable';
@@ -2858,10 +2423,10 @@ class _DevicesPageState extends State<DevicesPage> {
     final hasReadings = readings.isNotEmpty;
     final latestReading = hasReadings ? readings.first : null;
 
-    // Check if device is active (last reading < 5 seconds)
+    // Check if device is active (energy reading in last 30 seconds)
     final lastReadingTime = _deviceLastReadings[deviceId];
     final isActive = lastReadingTime != null &&
-        DateTime.now().difference(lastReadingTime).inSeconds < 10;
+        DateTime.now().difference(lastReadingTime).inSeconds <= 30;
 
     // Determine anomaly status from ML detection results
     final anomalyData = _deviceAnomalies[deviceId];
@@ -3466,6 +3031,26 @@ class _DevicesPageState extends State<DevicesPage> {
                 color: Colors.grey[700],
                 fontStyle: FontStyle.italic),
           ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.7),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.shield_outlined, size: 14, color: Colors.grey[700]),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Auto shutoff: If abnormal power is detected by the model, the device may be turned off automatically to protect the circuit. This only happens when the model flags a real issue.',
+                    style: TextStyle(fontSize: 10, color: Colors.grey[700]),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -3588,8 +3173,8 @@ class _DevicesPageState extends State<DevicesPage> {
         ),
         const SizedBox(height: 12),
 
-        // Sparkline
-        _buildSparkline(readings),
+        // Sparkline (Device Insight chart with time and current axes)
+        _buildSparkline(readings, timeRange),
         const SizedBox(height: 16),
 
         Card(
@@ -3665,7 +3250,7 @@ class _DevicesPageState extends State<DevicesPage> {
                 Icons.signal_cellular_alt),
             _buildStatCard(
                 'Latest',
-                _formatTime(latestReading.receivedAt.toLocal()),
+                _formatSriLankaTime(latestReading.receivedAt),
                 Icons.access_time),
           ],
         ),
@@ -3730,32 +3315,79 @@ class _DevicesPageState extends State<DevicesPage> {
     );
   }
 
-  Widget _buildSparkline(List<EnergyReading> readings) {
-    // Sample readings for sparkline (max 100 points)
-    final sampleSize = readings.length > 100 ? 100 : readings.length;
-    final step = readings.length > 100 ? (readings.length / 100).ceil() : 1;
-    final sampledReadings = <EnergyReading>[];
-    for (int i = 0; i < readings.length; i += step) {
-      sampledReadings.add(readings[i]);
-      if (sampledReadings.length >= sampleSize) break;
+  Widget _buildSparkline(List<EnergyReading> readings, TimeRange timeRange) {
+    if (readings.isEmpty) return const SizedBox.shrink();
+
+    final bool is7Days = timeRange == TimeRange.days7;
+    final List<FlSpot> spots;
+    final double minX;
+    final double maxX;
+    final double verticalInterval;
+    final String Function(int) bottomLabel;
+
+    if (is7Days) {
+      // Aggregate by day index (0..6): X = day, Y = average current (A)
+      final sorted = List<EnergyReading>.from(readings)
+        ..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
+      final startDate = sorted.first.receivedAt.toLocal();
+      final startDay = DateTime(startDate.year, startDate.month, startDate.day);
+
+      final daySums = <int, double>{};
+      final dayCounts = <int, int>{};
+      for (int d = 0; d < 7; d++) {
+        daySums[d] = 0.0;
+        dayCounts[d] = 0;
+      }
+      for (final r in sorted) {
+        final local = r.receivedAt.toLocal();
+        final readingDay = DateTime(local.year, local.month, local.day);
+        final dayIndex = readingDay.difference(startDay).inDays.clamp(0, 6);
+        daySums[dayIndex] = (daySums[dayIndex] ?? 0) + r.currentA;
+        dayCounts[dayIndex] = (dayCounts[dayIndex] ?? 0) + 1;
+      }
+      spots = [];
+      for (int d = 0; d < 7; d++) {
+        final count = dayCounts[d] ?? 0;
+        final avg = count > 0 ? (daySums[d]! / count) : 0.0;
+        spots.add(FlSpot(d.toDouble(), avg));
+      }
+      minX = 0;
+      maxX = 6;
+      verticalInterval = 1;
+      bottomLabel = (v) => 'Day ${v + 1}';
+    } else {
+      // Aggregate by hour of day (0-23): X = time of day, Y = average current (A)
+      final hourSums = <int, double>{};
+      final hourCounts = <int, int>{};
+      for (int h = 0; h < 24; h++) {
+        hourSums[h] = 0.0;
+        hourCounts[h] = 0;
+      }
+      for (final r in readings) {
+        final local = r.receivedAt.toLocal();
+        final hour = local.hour;
+        hourSums[hour] = (hourSums[hour] ?? 0) + r.currentA;
+        hourCounts[hour] = (hourCounts[hour] ?? 0) + 1;
+      }
+      spots = [];
+      for (int h = 0; h < 24; h++) {
+        final count = hourCounts[h] ?? 0;
+        final avg = count > 0 ? (hourSums[h]! / count) : 0.0;
+        spots.add(FlSpot(h.toDouble(), avg));
+      }
+      minX = 0;
+      maxX = 24;
+      verticalInterval = 6;
+      bottomLabel = (v) => v == 24 ? '24:00' : '${v.toString().padLeft(2, '0')}:00';
     }
-    final displayReadings = sampledReadings.reversed.toList();
-    if (displayReadings.isEmpty) return const SizedBox.shrink();
 
-    final maxCurrent =
-        displayReadings.map((r) => r.currentA).reduce((a, b) => a > b ? a : b);
-
-    final spots = displayReadings.asMap().entries.map((entry) {
-      final index = entry.key;
-      final reading = entry.value;
-      return FlSpot(index.toDouble(), reading.currentA);
-    }).toList();
-
-    // Use actual current values; ensure maxY has some headroom
+    final maxCurrent = spots.isEmpty
+        ? 1.0
+        : spots.map((s) => s.y).reduce((a, b) => a > b ? a : b);
     final chartMaxY = maxCurrent > 0 ? maxCurrent * 1.2 : 1.0;
 
     return Container(
-      height: 100,
+      height: 120,
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerLowest,
@@ -3763,8 +3395,62 @@ class _DevicesPageState extends State<DevicesPage> {
       ),
       child: LineChart(
         LineChartData(
-          gridData: const FlGridData(show: false),
-          titlesData: const FlTitlesData(show: false),
+          minX: minX,
+          maxX: maxX,
+          minY: 0,
+          maxY: chartMaxY,
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: true,
+            verticalInterval: verticalInterval,
+            horizontalInterval: chartMaxY > 0 ? chartMaxY / 4 : 1,
+            getDrawingHorizontalLine: (value) => FlLine(
+              color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5),
+              strokeWidth: 1,
+            ),
+            getDrawingVerticalLine: (value) => FlLine(
+              color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.3),
+              strokeWidth: 0.5,
+            ),
+          ),
+          titlesData: FlTitlesData(
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 36,
+                interval: chartMaxY > 0 ? chartMaxY / 4 : 1,
+                getTitlesWidget: (value, meta) => Text(
+                  '${value.toStringAsFixed(2)} A',
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                  ),
+                ),
+              ),
+            ),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 24,
+                interval: verticalInterval,
+                getTitlesWidget: (value, meta) {
+                  final v = value.round().clamp(0, is7Days ? 6 : 24);
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      bottomLabel(v),
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          ),
           borderData: FlBorderData(show: false),
           lineBarsData: [
             LineChartBarData(
@@ -3779,8 +3465,6 @@ class _DevicesPageState extends State<DevicesPage> {
               ),
             ),
           ],
-          minY: 0,
-          maxY: chartMaxY,
         ),
       ),
     );
@@ -3957,6 +3641,27 @@ class _DevicesPageState extends State<DevicesPage> {
       return parsed ?? DateTime.now();
     }
     return DateTime.now();
+  }
+
+  /// receivedAt from backend is UTC (DateTime.utcnow()). Sri Lanka = UTC+5:30.
+  /// Compute Sri Lanka date/time by adding 5h 30m to UTC components.
+  String _formatSriLankaTime(DateTime dateTime) {
+    final utc = dateTime.toUtc();
+    // Add 5 hours 30 minutes; DateTime handles day/month rollover
+    final sl = DateTime.utc(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour + 5,
+      utc.minute + 30,
+      utc.second,
+      utc.millisecond,
+    );
+    final day = sl.day.toString().padLeft(2, '0');
+    final month = sl.month.toString().padLeft(2, '0');
+    final hour = sl.hour.toString().padLeft(2, '0');
+    final minute = sl.minute.toString().padLeft(2, '0');
+    return '$day/$month $hour:$minute';
   }
 
   String _formatTime(DateTime dateTime) {

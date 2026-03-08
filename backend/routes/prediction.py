@@ -5,6 +5,7 @@ from app.models.prediction_model import Prediction
 from datetime import datetime, timedelta
 from utils.jwt_handler import get_current_user
 import pandas as pd
+import numpy as np
 import sys
 import json
 from pathlib import Path
@@ -170,8 +171,8 @@ def predict_energy(
 
         df = pd.DataFrame(data)
         df = df.sort_values('received_at')
+        df = _add_time_features(df)
 
-        # Use LSTM for time series prediction
         predictions_df = lstm_service.predict(df.tail(50), steps_ahead=min(hours_ahead, 24))
         predictions = predictions_df['predicted_power_w'].tolist()
 
@@ -257,42 +258,9 @@ def weekly_forecast(
                 detail="Not enough recent data for a weekly forecast. Need at least 10 readings.",
             )
 
-        df = pd.DataFrame(data).sort_values("received_at")
+        df = _add_time_features(pd.DataFrame(data).sort_values("received_at"))
 
-        # LSTM predicts up to 24 steps at a time.
-        # We call it multiple times to cover 7 days (168 hours).
-        all_predictions = []
-        input_slice = df.tail(50)
-
-        # Predict in 24-hour chunks
-        for day_idx in range(7):
-            steps = min(24, 168 - len(all_predictions))
-            if steps <= 0:
-                break
-            try:
-                pred_df = lstm_service.predict(input_slice, steps_ahead=steps)
-                day_preds = pred_df["predicted_power_w"].tolist()
-                all_predictions.extend(day_preds)
-
-                # Build a pseudo-input for the next chunk using predictions
-                new_rows = []
-                base_time = datetime.utcnow() + timedelta(hours=len(all_predictions) - len(day_preds))
-                for i, pw in enumerate(day_preds):
-                    new_rows.append({
-                        "module": input_slice.iloc[-1].get("module", ""),
-                        "location": location or input_slice.iloc[-1].get("location", ""),
-                        "current_a": pw / 230.0,
-                        "power_w": pw,
-                        "received_at": base_time + timedelta(hours=i + 1),
-                    })
-                if new_rows:
-                    input_slice = pd.DataFrame(new_rows)
-            except Exception:
-                # If prediction fails on later days, use the average of existing predictions
-                avg_so_far = sum(all_predictions) / len(all_predictions) if all_predictions else 0
-                remaining = 168 - len(all_predictions)
-                all_predictions.extend([avg_so_far] * remaining)
-                break
+        all_predictions = _run_7day_lstm_forecast(df, lstm_service, location)
 
         # Aggregate into daily breakdown
         now = datetime.utcnow()
@@ -379,6 +347,20 @@ def _parse_energy_doc(doc):
     }
 
 
+def _add_time_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add time-based features required by the LSTM model."""
+    df = df.copy()
+    df["received_at"] = pd.to_datetime(df["received_at"])
+    df["hour"] = df["received_at"].dt.hour
+    df["day_of_week"] = df["received_at"].dt.dayofweek
+    df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
+    df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
+    df["day_sin"] = np.sin(2 * np.pi * df["day_of_week"] / 7)
+    df["day_cos"] = np.cos(2 * np.pi * df["day_of_week"] / 7)
+    df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
+    return df
+
+
 def _run_7day_lstm_forecast(df, lstm_service, location=None):
     """
     Run LSTM predictions for 7 days (168 hours) in 24-hour chunks.
@@ -387,7 +369,7 @@ def _run_7day_lstm_forecast(df, lstm_service, location=None):
         all_predictions: list of 168 predicted power_w values (hourly)
     """
     all_predictions = []
-    input_slice = df.tail(50)
+    input_slice = _add_time_features(df.tail(50))
 
     for day_idx in range(7):
         steps = min(24, 168 - len(all_predictions))
@@ -401,15 +383,16 @@ def _run_7day_lstm_forecast(df, lstm_service, location=None):
             new_rows = []
             base_time = datetime.utcnow() + timedelta(hours=len(all_predictions) - len(day_preds))
             for i, pw in enumerate(day_preds):
+                ts = base_time + timedelta(hours=i + 1)
                 new_rows.append({
                     "module": input_slice.iloc[-1].get("module", ""),
                     "location": location or input_slice.iloc[-1].get("location", ""),
                     "current_a": pw / 230.0,
                     "power_w": pw,
-                    "received_at": base_time + timedelta(hours=i + 1),
+                    "received_at": ts,
                 })
             if new_rows:
-                input_slice = pd.DataFrame(new_rows)
+                input_slice = _add_time_features(pd.DataFrame(new_rows))
         except Exception:
             avg_so_far = sum(all_predictions) / len(all_predictions) if all_predictions else 0
             remaining = 168 - len(all_predictions)
