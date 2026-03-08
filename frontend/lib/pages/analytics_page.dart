@@ -73,6 +73,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   List<Map<String, dynamic>> _energyAdviceHistory = [];
   bool _loadingHistory = false;
   bool _historySectionExpanded = true;
+  bool _historyShowAll = false; // when false, show only 5; "Show more" reveals all
   final Set<String> _selectedHistoryIds = {};
   DateTime? _historyFilterFrom;
   DateTime? _historyFilterTo;
@@ -917,8 +918,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                     child: Text('No entries match the date filter.'),
                   ),
                 )
-              else
-                ...filtered.take(30).map((item) {
+              else ...[
+                ...filtered.take(_historyShowAll ? 30 : 5).map((item) {
                   final id = item['id'] as String? ?? '';
                   final created = item['created_at'] as String?;
                   final snapshot = item['readings_snapshot'] as Map<String, dynamic>?;
@@ -1045,6 +1046,21 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                     ),
                   );
                 }),
+                if (!_historyShowAll && filtered.length > 5)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: TextButton.icon(
+                      onPressed: () {
+                        setState(() => _historyShowAll = true);
+                      },
+                      icon: const Icon(Icons.expand_more, size: 20),
+                      label: Text(
+                        'Show more (${filtered.length - 5} more)',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ),
+              ],
             ],
           ],
         ),
