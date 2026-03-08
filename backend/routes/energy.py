@@ -257,6 +257,16 @@ def _parse_ts(raw) -> Optional[datetime]:
     return None
 
 
+def _serialize_doc_timestamps(doc: dict) -> dict:
+    """Ensure received_at (and similar timestamps) are ISO strings with Z (UTC) for frontend."""
+    out = dict(doc)
+    for key in ("received_at", "receivedAt", "timestamp", "created_at"):
+        val = out.get(key)
+        if isinstance(val, datetime):
+            out[key] = val.isoformat() + "Z" if val.tzinfo is None else val.isoformat()
+    return out
+
+
 def _integrate_energy_kwh(readings: List[Dict]) -> Dict[str, Dict]:
     """Compute approximate energy (kWh) per location using trapezoidal integration over current/voltage."""
     per_loc_points: Dict[str, List[Dict]] = {}
@@ -329,7 +339,7 @@ def get_latest_energy(
         .sort(_timestamp_sort_fields())
         .limit(limit)
     )
-    return list(cursor)
+    return [_serialize_doc_timestamps(d) for d in cursor]
 
 
 @router.get("/by-location")
@@ -352,7 +362,7 @@ def get_latest_energy_by_location(module: Optional[str] = None):
         ]
     )
 
-    return list(energy_col.aggregate(pipeline))
+    return [_serialize_doc_timestamps(d) for d in energy_col.aggregate(pipeline)]
 
 
 @router.get("/usage")
