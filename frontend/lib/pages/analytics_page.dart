@@ -854,7 +854,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 ],
               ),
               // Select all / Deselect / Delete selected
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   TextButton(
                     onPressed: filtered.isEmpty
@@ -875,7 +878,6 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                     },
                     child: const Text('Deselect all'),
                   ),
-                  const SizedBox(width: 8),
                   FilledButton.icon(
                     onPressed: _selectedHistoryIds.isEmpty
                         ? null
@@ -1325,108 +1327,190 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       elevation: 2,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final narrow = constraints.maxWidth < 380;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.electric_bolt, color: stats.trendColor),
-                const SizedBox(width: 8),
-                const Text(
-                  'Curent Energy Analysis',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const Spacer(),
-                if (stats.latest != null)
-                  Text(
-                    'Last seen: ${_friendlyTime(stats.latest!.receivedAt)}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withOpacity(0.6),
-                    ),
+                if (narrow)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.electric_bolt, color: stats.trendColor),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Curent Energy Analysis',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (stats.latest != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Last seen: ${_friendlyTime(stats.latest!.receivedAt)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withOpacity(0.6),
+                          ),
+                        ),
+                      ],
+                    ],
+                  )
+                else
+                  Row(
+                    children: [
+                      Icon(Icons.electric_bolt, color: stats.trendColor),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Curent Energy Analysis',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      if (stats.latest != null)
+                        Flexible(
+                          child: Text(
+                            'Last seen: ${_friendlyTime(stats.latest!.receivedAt)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withOpacity(0.6),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
                   ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (stats.latest != null) ...[
+                      _pill('${stats.latest!.location} • ${stats.latest!.module}'),
+                      _pill('Sensor: ${stats.latest!.sensor}'),
+                      _pill('Type: ${stats.latest!.type ?? 'curent'}'),
+                    ],
+                    _pill(
+                        'Trend: ${stats.trendLabel} (${stats.deltaPercent.toStringAsFixed(1)}%)'),
+                  ],
+                ),
               ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (stats.latest != null) ...[
-                  _pill('${stats.latest!.location} • ${stats.latest!.module}'),
-                  _pill('Sensor: ${stats.latest!.sensor}'),
-                  _pill('Type: ${stats.latest!.type ?? 'curent'}'),
-                ],
-                _pill(
-                    'Trend: ${stats.trendLabel} (${stats.deltaPercent.toStringAsFixed(1)}%)'),
-              ],
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
   }
 
   Widget _buildCurentEnergyMetrics(_CurentEnergyStats stats) {
+    const double spacing = 12;
+    const double minTileWidth = 120;
     return Card(
       elevation: 2,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: const [
-                Icon(Icons.insights, color: Colors.green),
-                SizedBox(width: 8),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final crossAxisCount = width < 280
+                ? 1
+                : width < 420
+                    ? 2
+                    : width < 600
+                        ? 3
+                        : width < 800
+                            ? 4
+                            : 5;
+            final tileWidth = ((width - (crossAxisCount - 1) * spacing) /
+                    crossAxisCount)
+                .clamp(minTileWidth, 180.0);
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: const [
+                    Icon(Icons.insights, color: Colors.green),
+                    SizedBox(width: 8),
+                    Text(
+                      'Curent Metrics',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: [
+                    _energyMetricTile(
+                        'Latest Curent',
+                        '${stats.latestCurentA.toStringAsFixed(3)} A',
+                        Colors.blue,
+                        width: tileWidth),
+                    _energyMetricTile(
+                        'Latest Curent',
+                        '${stats.latestCurentMa.toStringAsFixed(0)} mA',
+                        Colors.indigo,
+                        width: tileWidth),
+                    _energyMetricTile(
+                        'Avg Curent',
+                        '${stats.avgCurentA.toStringAsFixed(3)} A',
+                        Colors.teal,
+                        width: tileWidth),
+                    _energyMetricTile(
+                        'Peak Curent',
+                        '${stats.maxCurentA.toStringAsFixed(3)} A',
+                        Colors.orange,
+                        width: tileWidth),
+                    _energyMetricTile(
+                        'Estimated Power',
+                        '${stats.latestPowerW.toStringAsFixed(1)} W',
+                        Colors.deepOrange,
+                        width: tileWidth),
+                    _energyMetricTile(
+                        'Avg Power',
+                        '${stats.avgPowerW.toStringAsFixed(1)} W',
+                        Colors.purple,
+                        width: tileWidth),
+                    _energyMetricTile(
+                        'Signal',
+                        '${stats.latestRssi ?? 'n/a'} dBm',
+                        stats.signalColor,
+                        width: tileWidth),
+                    _energyMetricTile(
+                        'Energy (kWh)',
+                        stats.estimatedEnergyKwh.toStringAsFixed(4),
+                        Colors.green,
+                        width: tileWidth),
+                  ],
+                ),
+                const SizedBox(height: 10),
                 Text(
-                  'Curent Metrics',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  'Samples: ${stats.sampleCount} | Window: ${stats.windowMinutes} min',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.65),
+                  ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                _energyMetricTile(
-                    'Latest Curent',
-                    '${stats.latestCurentA.toStringAsFixed(3)} A',
-                    Colors.blue),
-                _energyMetricTile(
-                    'Latest Curent',
-                    '${stats.latestCurentMa.toStringAsFixed(0)} mA',
-                    Colors.indigo),
-                _energyMetricTile('Avg Curent',
-                    '${stats.avgCurentA.toStringAsFixed(3)} A', Colors.teal),
-                _energyMetricTile('Peak Curent',
-                    '${stats.maxCurentA.toStringAsFixed(3)} A', Colors.orange),
-                _energyMetricTile(
-                    'Estimated Power',
-                    '${stats.latestPowerW.toStringAsFixed(1)} W',
-                    Colors.deepOrange),
-                _energyMetricTile('Avg Power',
-                    '${stats.avgPowerW.toStringAsFixed(1)} W', Colors.purple),
-                _energyMetricTile('Signal', '${stats.latestRssi ?? 'n/a'} dBm',
-                    stats.signalColor),
-                _energyMetricTile('Energy (kWh)',
-                    stats.estimatedEnergyKwh.toStringAsFixed(4), Colors.green),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Samples: ${stats.sampleCount} | Window: ${stats.windowMinutes} min',
-              style: TextStyle(
-                fontSize: 12,
-                color:
-                    Theme.of(context).colorScheme.onSurface.withOpacity(0.65),
-              ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -1504,9 +1588,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _energyMetricTile(String label, String value, Color color) {
+  Widget _energyMetricTile(String label, String value, Color color,
+      {double? width}) {
     return Container(
-      width: 155,
+      width: width ?? 155,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: color.withOpacity(0.08),
@@ -1680,45 +1765,89 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       elevation: 2,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final narrow = constraints.maxWidth < 320;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  stats.isOccupied ? Icons.sensor_occupied : Icons.sensor_door,
-                  color: stats.isOccupied ? Colors.green : Colors.amber,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  stats.isOccupied ? 'Occupied' : 'Vacant',
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const Spacer(),
-                Text(
-                  'Last seen: ${_friendlyTime(latest.receivedAt)}',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withOpacity(0.6)),
+                if (narrow)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            stats.isOccupied
+                                ? Icons.sensor_occupied
+                                : Icons.sensor_door,
+                            color: stats.isOccupied ? Colors.green : Colors.amber,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            stats.isOccupied ? 'Occupied' : 'Vacant',
+                            style: const TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Last seen: ${_friendlyTime(latest.receivedAt)}',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withOpacity(0.6)),
+                      ),
+                    ],
+                  )
+                else
+                  Row(
+                    children: [
+                      Icon(
+                        stats.isOccupied
+                            ? Icons.sensor_occupied
+                            : Icons.sensor_door,
+                        color: stats.isOccupied ? Colors.green : Colors.amber,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        stats.isOccupied ? 'Occupied' : 'Vacant',
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      Flexible(
+                        child: Text(
+                          'Last seen: ${_friendlyTime(latest.receivedAt)}',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withOpacity(0.6)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _pill('${latest.location} • ${latest.module}'),
+                    _pill('Vacancy: ${stats.vacancyMinutes} min'),
+                    _pill('Avg temp: ${stats.avgTemp.toStringAsFixed(1)}°C'),
+                    _pill(
+                        'Avg humidity: ${stats.avgHumidity.toStringAsFixed(0)}%'),
+                  ],
                 ),
               ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _pill('${latest.location} • ${latest.module}'),
-                _pill('Vacancy: ${stats.vacancyMinutes} min'),
-                _pill('Avg temp: ${stats.avgTemp.toStringAsFixed(1)}°C'),
-                _pill('Avg humidity: ${stats.avgHumidity.toStringAsFixed(0)}%'),
-              ],
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -1884,32 +2013,41 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       elevation: 2,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: const [
-                Icon(Icons.thermostat, color: Colors.deepOrange),
-                SizedBox(width: 8),
-                Text('Comfort & Drift',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final useWrappedLayout = width < 340;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _valueTile('Temp', '${stats.latestTemp.toStringAsFixed(1)}°C',
-                    stats.tempStatusColor),
-                const SizedBox(width: 10),
-                _valueTile(
-                    'Humidity',
-                    '${stats.latestHumidity.toStringAsFixed(0)}%',
-                    stats.humidityStatusColor),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
+                  children: const [
+                    Icon(Icons.thermostat, color: Colors.deepOrange),
+                    SizedBox(width: 8),
+                    Text('Comfort & Drift',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (useWrappedLayout) ...[
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      _valueTile(
+                          'Temp',
+                          '${stats.latestTemp.toStringAsFixed(1)}°C',
+                          stats.tempStatusColor),
+                      _valueTile(
+                          'Humidity',
+                          '${stats.latestHumidity.toStringAsFixed(0)}%',
+                          stats.humidityStatusColor),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(stats.comfortNote,
                           style: const TextStyle(
@@ -1926,52 +2064,104 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                       ),
                     ],
                   ),
-                ),
+                ] else
+                  Row(
+                    children: [
+                      _valueTile(
+                          'Temp',
+                          '${stats.latestTemp.toStringAsFixed(1)}°C',
+                          stats.tempStatusColor),
+                      const SizedBox(width: 10),
+                      _valueTile(
+                          'Humidity',
+                          '${stats.latestHumidity.toStringAsFixed(0)}%',
+                          stats.humidityStatusColor),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(stats.comfortNote,
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 6),
+                            LinearProgressIndicator(
+                              value: stats.tempBandProgress,
+                              minHeight: 8,
+                              backgroundColor: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  stats.tempStatusColor),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
               ],
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
   }
 
   Widget _buildSensorHealth(SensorReading latest, _DerivedStats stats) {
+    const double spacing = 12;
+    const double minTileWidth = 100;
     return Card(
       elevation: 2,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: const [
-                Icon(Icons.wifi_tethering, color: Colors.blueGrey),
-                SizedBox(width: 8),
-                Text('Sensor Health',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final crossAxisCount = width < 360 ? 1 : width < 520 ? 2 : 3;
+            final tileWidth = ((width - (crossAxisCount - 1) * spacing) /
+                    crossAxisCount)
+                .clamp(minTileWidth, 180.0);
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _healthTile('RSSI', '${latest.rssi ?? -80} dBm',
-                    stats.signalColor, stats.signalLabel),
-                _healthTile(
-                    'Uptime',
-                    latest.uptime != null ? '${latest.uptime}s' : 'n/a',
-                    Colors.indigo,
-                    'since boot'),
-                _healthTile(
-                    'Heap',
-                    latest.heap != null ? '${latest.heap} B' : 'n/a',
-                    Colors.teal,
-                    'free mem'),
+                Row(
+                  children: const [
+                    Icon(Icons.wifi_tethering, color: Colors.blueGrey),
+                    SizedBox(width: 8),
+                    Text('Sensor Health',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: [
+                    _healthTile(
+                        'RSSI',
+                        '${latest.rssi ?? -80} dBm',
+                        stats.signalColor,
+                        stats.signalLabel,
+                        width: tileWidth),
+                    _healthTile(
+                        'Uptime',
+                        latest.uptime != null ? '${latest.uptime}s' : 'n/a',
+                        Colors.indigo,
+                        'since boot',
+                        width: tileWidth),
+                    _healthTile(
+                        'Heap',
+                        latest.heap != null ? '${latest.heap} B' : 'n/a',
+                        Colors.teal,
+                        'free mem',
+                        width: tileWidth),
+                  ],
+                ),
               ],
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -2753,9 +2943,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _healthTile(String label, String value, Color color, String hint) {
+  Widget _healthTile(String label, String value, Color color, String hint,
+      {double? width}) {
     return Container(
-      width: 150,
+      width: width ?? 150,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
           color: color.withOpacity(0.08),
