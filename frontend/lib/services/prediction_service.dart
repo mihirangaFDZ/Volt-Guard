@@ -55,21 +55,16 @@ class PredictionService {
   }
 
   /// Fetch a device-specific 7-day forecast with historical comparison,
-  /// risk level, and cost projections.
+  /// risk level, and cost projections using LECO block tariff.
   Future<Map<String, dynamic>> fetchDeviceForecast(
-    String deviceId, {
-    double ratePerKwh = 42.5,
-  }) async {
+    String deviceId,
+  ) async {
     final headers = await _authService.getAuthHeaders();
     headers['Accept'] = 'application/json';
 
-    final params = <String, String>{
-      'rate_per_kwh': ratePerKwh.toString(),
-    };
-
     final uri = Uri.parse(
       '${ApiConfig.baseUrl}${ApiConfig.predictionEndpoint}/device-forecast/$deviceId',
-    ).replace(queryParameters: params);
+    );
 
     final resp = await http.get(uri, headers: headers).timeout(
       const Duration(seconds: 90),
@@ -79,19 +74,14 @@ class PredictionService {
   }
 
   /// Fetch ranked comparison of all devices by predicted weekly consumption.
-  Future<Map<String, dynamic>> fetchDeviceComparison({
-    double ratePerKwh = 42.5,
-  }) async {
+  /// Uses LECO block tariff for cost calculations.
+  Future<Map<String, dynamic>> fetchDeviceComparison() async {
     final headers = await _authService.getAuthHeaders();
     headers['Accept'] = 'application/json';
 
-    final params = <String, String>{
-      'rate_per_kwh': ratePerKwh.toString(),
-    };
-
     final uri = Uri.parse(
       '${ApiConfig.baseUrl}${ApiConfig.predictionEndpoint}/device-comparison',
-    ).replace(queryParameters: params);
+    );
 
     final resp = await http.get(uri, headers: headers).timeout(
       const Duration(seconds: 120),

@@ -29,6 +29,59 @@ _lstm_lock = threading.Lock()
 # Cache for CI offsets loaded from lstm_evaluation.json
 _ci_cache: dict = {}
 
+# ---------------------------------------------------------------------------
+# LECO Block Tariff (Domestic, revised 12 June 2025)
+# ---------------------------------------------------------------------------
+# Block 01:   0 -  60 units  → Rs 12.75
+# Block 02:  61 -  90 units  → Rs 18.50
+# Block 03:  91 - 120 units  → Rs 24.00
+# Block 04: 121 - 180 units  → Rs 41.00
+# Block 05: 181 -1000 units  → Rs 61.00
+
+_LECO_BLOCKS = [
+    (60,  12.75),
+    (30,  18.50),   # 61-90
+    (30,  24.00),   # 91-120
+    (60,  41.00),   # 121-180
+    (820, 61.00),   # 181-1000
+]
+
+
+def calculate_leco_bill(monthly_units: float) -> dict:
+    """Calculate electricity bill using LECO domestic block tariff.
+
+    Returns a dict with total_bill, effective_rate, and per-block breakdown.
+    """
+    remaining = max(monthly_units, 0.0)
+    total_bill = 0.0
+    breakdown = []
+    cumulative = 0
+
+    for block_size, rate in _LECO_BLOCKS:
+        block_start = cumulative
+        units_in_block = min(remaining, block_size)
+        if units_in_block <= 0:
+            break
+        cost = units_in_block * rate
+        total_bill += cost
+        remaining -= units_in_block
+        cumulative += block_size
+        breakdown.append({
+            "block": f"{block_start + 1}-{block_start + block_size}",
+            "units": round(units_in_block, 2),
+            "rate": rate,
+            "cost": round(cost, 2),
+        })
+
+    effective_rate = total_bill / monthly_units if monthly_units > 0 else 0.0
+
+    return {
+        "monthly_units": round(monthly_units, 2),
+        "total_bill_lkr": round(total_bill, 2),
+        "effective_rate_per_kwh": round(effective_rate, 2),
+        "breakdown": breakdown,
+    }
+
 def _load_ci_offsets() -> dict:
     """Load empirical confidence interval offsets from evaluation JSON."""
     global _ci_cache
@@ -423,7 +476,6 @@ def _aggregate_daily(readings_data, start_date, num_days, is_historical=False):
 @router.get("/device-forecast/{device_id}")
 def device_forecast(
     device_id: str,
-    rate_per_kwh: float = Query(42.5, ge=0, description="Electricity rate in LKR per kWh"),
 ):
     """
     Get a 7-day energy forecast for a specific device.
@@ -579,11 +631,21 @@ def device_forecast(
             risk_level = "green"
             risk_reason = "Insufficient historical data for comparison."
 
-        # 7. Cost projections
-        weekly_cost_lkr = weekly_total_kwh * rate_per_kwh
-        monthly_projection_lkr = weekly_cost_lkr * (30.0 / 7.0)
-        last_week_cost_lkr = last_week_total_kwh * rate_per_kwh
-        savings_10pct = weekly_cost_lkr * 0.1
+        # 7. Cost projections using LECO block tariff
+        monthly_kwh = weekly_total_kwh * (30.0 / 7.0)
+        bill_info = calculate_leco_bill(monthly_kwh)
+        monthly_bill_lkr = bill_info["total_bill_lkr"]
+        weekly_cost_lkr = monthly_bill_lkr * (7.0 / 30.0)
+        effective_rate = bill_info["effective_rate_per_kwh"]
+
+        last_week_monthly = last_week_total_kwh * (30.0 / 7.0)
+        last_week_bill = calculate_leco_bill(last_week_monthly)
+        last_week_cost_lkr = last_week_bill["total_bill_lkr"] * (7.0 / 30.0)
+
+        # Savings if usage reduced by 10%
+        reduced_monthly = monthly_kwh * 0.9
+        reduced_bill = calculate_leco_bill(reduced_monthly)
+        savings_10pct = weekly_cost_lkr - reduced_bill["total_bill_lkr"] * (7.0 / 30.0)
 
         # Save forecast
         prediction_col.insert_one({
@@ -616,11 +678,13 @@ def device_forecast(
                 "historical_avg_daily_kwh": round(historical_avg_daily, 3),
             },
             "cost": {
-                "rate_per_kwh_lkr": rate_per_kwh,
+                "tariff_type": "LECO_domestic_block",
+                "effective_rate_per_kwh": effective_rate,
                 "weekly_cost_lkr": round(weekly_cost_lkr, 2),
-                "monthly_projection_lkr": round(monthly_projection_lkr, 2),
+                "monthly_projection_lkr": round(monthly_bill_lkr, 2),
                 "last_week_cost_lkr": round(last_week_cost_lkr, 2),
                 "weekly_savings_if_reduced_10pct_lkr": round(savings_10pct, 2),
+                "tariff_breakdown": bill_info["breakdown"],
             },
             "generated_at": now.isoformat(),
         }
@@ -636,14 +700,12 @@ def device_forecast(
 # ---------------------------------------------------------------------------
 
 @router.get("/device-comparison")
-def device_comparison(
-    rate_per_kwh: float = Query(42.5, ge=0, description="Electricity rate in LKR per kWh"),
-):
+def device_comparison():
     """
     Get predicted weekly consumption for all devices, ranked by usage.
 
     Returns a ranked list of devices sorted by predicted weekly kWh (descending).
-    Useful for facility managers to quickly identify heavy consumers.
+    Uses LECO domestic block tariff for cost calculations.
     """
     try:
         lstm_service = get_lstm_service()
@@ -754,7 +816,6 @@ def device_comparison(
                     "device_name": device_name,
                     "location": location,
                     "predicted_weekly_kwh": round(weekly_kwh, 3),
-                    "weekly_cost_lkr": round(weekly_kwh * rate_per_kwh, 2),
                     "risk_level": risk,
                     "trend": trend,
                     "percent_change": round(pct, 2),
@@ -767,13 +828,29 @@ def device_comparison(
         device_results.sort(key=lambda d: d["predicted_weekly_kwh"], reverse=True)
 
         total_kwh = sum(d["predicted_weekly_kwh"] for d in device_results)
-        total_cost = sum(d["weekly_cost_lkr"] for d in device_results)
+
+        # Apply LECO block tariff to total household monthly consumption
+        total_monthly_kwh = total_kwh * (30.0 / 7.0)
+        bill_info = calculate_leco_bill(total_monthly_kwh)
+        total_monthly_bill = bill_info["total_bill_lkr"]
+        total_weekly_cost = total_monthly_bill * (7.0 / 30.0)
+        effective_rate = bill_info["effective_rate_per_kwh"]
+
+        # Distribute cost proportionally among devices
+        for d in device_results:
+            if total_kwh > 0:
+                d["weekly_cost_lkr"] = round(d["predicted_weekly_kwh"] / total_kwh * total_weekly_cost, 2)
+            else:
+                d["weekly_cost_lkr"] = 0.0
 
         return {
             "devices": device_results,
             "total_predicted_kwh": round(total_kwh, 3),
-            "total_weekly_cost_lkr": round(total_cost, 2),
-            "rate_per_kwh_lkr": rate_per_kwh,
+            "total_weekly_cost_lkr": round(total_weekly_cost, 2),
+            "total_monthly_bill_lkr": round(total_monthly_bill, 2),
+            "effective_rate_per_kwh": effective_rate,
+            "tariff_type": "LECO_domestic_block",
+            "tariff_breakdown": bill_info["breakdown"],
             "device_count": len(device_results),
             "generated_at": now.isoformat(),
         }
@@ -791,7 +868,6 @@ def device_comparison(
 @router.get("/energy-savings-report/{device_id}")
 def energy_savings_report(
     device_id: str,
-    rate_per_kwh: float = Query(42.5, ge=0, description="Electricity rate in LKR per kWh"),
 ):
     """
     Measure actual week-over-week energy savings for a device.
@@ -846,7 +922,12 @@ def energy_savings_report(
             savings_kwh = 0.0
             savings_pct = 0.0
 
-        savings_lkr = round(savings_kwh * rate_per_kwh, 2)
+        # Calculate savings using LECO block tariff
+        prev_monthly = previous_week_kwh * (30.0 / 7.0)
+        curr_monthly = current_week_kwh * (30.0 / 7.0)
+        prev_bill = calculate_leco_bill(prev_monthly)["total_bill_lkr"]
+        curr_bill = calculate_leco_bill(curr_monthly)["total_bill_lkr"]
+        savings_lkr = round(prev_bill - curr_bill, 2)
 
         # LSTM prediction accuracy for current week
         lstm_service = get_lstm_service()
@@ -889,7 +970,7 @@ def energy_savings_report(
             "savings_lkr": savings_lkr,
             "lstm_predicted_kwh": lstm_predicted_kwh,
             "prediction_vs_actual_pct_error": prediction_error_pct,
-            "rate_per_kwh_lkr": rate_per_kwh,
+            "tariff_type": "LECO_domestic_block",
             "measurement_method": "week-over-week comparison",
             "measurement_period": {
                 "current_week_start": cutoff_7d.isoformat(),

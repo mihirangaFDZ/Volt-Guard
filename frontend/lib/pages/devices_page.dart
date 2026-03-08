@@ -1901,9 +1901,10 @@ class _DevicesPageState extends State<DevicesPage> {
     final savingsLkr =
         (cost['weekly_savings_if_reduced_10pct_lkr'] as num).toDouble();
 
-    final effectiveWeekly = _scenarioReducedUsage ? weeklyLkr * 0.9 : weeklyLkr;
+    // When scenario is on, use the block-tariff-aware savings from backend
+    final effectiveWeekly = _scenarioReducedUsage ? weeklyLkr - savingsLkr : weeklyLkr;
     final effectiveMonthly =
-        _scenarioReducedUsage ? monthlyLkr * 0.9 : monthlyLkr;
+        _scenarioReducedUsage ? monthlyLkr - savingsLkr * (30.0 / 7.0) : monthlyLkr;
 
     // Determine monthly change message
     final monthlyChange = lastWeekLkr > 0
@@ -1925,11 +1926,18 @@ class _DevicesPageState extends State<DevicesPage> {
             children: [
               Icon(Icons.paid, color: Colors.green.shade700, size: 20),
               const SizedBox(width: 8),
-              const Text(
-                'Cost Projection (LKR)',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              const Expanded(
+                child: Text(
+                  'Cost Projection (LECO Tariff)',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                ),
               ),
             ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Based on LECO domestic block tariff (revised June 2025)',
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
           ),
           const SizedBox(height: 12),
           Row(
@@ -1944,7 +1952,7 @@ class _DevicesPageState extends State<DevicesPage> {
               const SizedBox(width: 8),
               Expanded(
                 child: _buildCostItem(
-                  'Monthly Trend',
+                  'Monthly Bill',
                   'Rs. ${effectiveMonthly.toStringAsFixed(0)}',
                   Colors.blue.shade700,
                 ),
@@ -2192,7 +2200,7 @@ class _DevicesPageState extends State<DevicesPage> {
                           ),
                         ),
                         Text(
-                          'Total Predicted',
+                          'Weekly kWh',
                           style: TextStyle(
                               fontSize: 10, color: Colors.grey.shade600),
                         ),
@@ -2212,6 +2220,25 @@ class _DevicesPageState extends State<DevicesPage> {
                         ),
                         Text(
                           'Weekly Cost',
+                          style: TextStyle(
+                              fontSize: 10, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                    Container(
+                        width: 1, height: 30, color: Colors.teal.shade200),
+                    Column(
+                      children: [
+                        Text(
+                          'Rs. ${(_deviceComparison!['total_monthly_bill_lkr'] as num?)?.toStringAsFixed(0) ?? '-'}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: Colors.teal.shade800,
+                          ),
+                        ),
+                        Text(
+                          'Monthly Bill',
                           style: TextStyle(
                               fontSize: 10, color: Colors.grey.shade600),
                         ),
@@ -3717,19 +3744,15 @@ class _DevicesPageState extends State<DevicesPage> {
 
     final maxCurrent =
         displayReadings.map((r) => r.currentA).reduce((a, b) => a > b ? a : b);
-    final minCurrent =
-        displayReadings.map((r) => r.currentA).reduce((a, b) => a < b ? a : b);
-    final range = (maxCurrent - minCurrent).abs();
-    final padding = range * 0.1;
 
     final spots = displayReadings.asMap().entries.map((entry) {
       final index = entry.key;
       final reading = entry.value;
-      final normalized = range > 0
-          ? ((reading.currentA - minCurrent + padding) / (range + padding * 2))
-          : 0.5;
-      return FlSpot(index.toDouble(), 1 - normalized);
+      return FlSpot(index.toDouble(), reading.currentA);
     }).toList();
+
+    // Use actual current values; ensure maxY has some headroom
+    final chartMaxY = maxCurrent > 0 ? maxCurrent * 1.2 : 1.0;
 
     return Container(
       height: 100,
@@ -3757,7 +3780,7 @@ class _DevicesPageState extends State<DevicesPage> {
             ),
           ],
           minY: 0,
-          maxY: 1,
+          maxY: chartMaxY,
         ),
       ),
     );
