@@ -152,7 +152,39 @@ class _DevicesPageState extends State<DevicesPage> {
       _deviceForecast = null;
     });
     try {
-      final forecast = await _predictionService.fetchDeviceForecast(deviceId);
+      // Avoid 503: check model readiness before calling prediction API
+      final manager = MLTrainingManager.instance;
+      await manager.refreshStatus();
+      if (manager.isTraining) {
+        if (!mounted) return;
+        setState(() {
+          _forecastError = 'Model training in progress. Please pull to refresh when done.';
+          _forecastLoading = false;
+        });
+        return;
+      }
+      if (!manager.isModelReady) {
+        if (!mounted) return;
+        setState(() {
+          _forecastError = 'Model not ready. Pull to refresh to retry.';
+          _forecastLoading = false;
+        });
+        return;
+      }
+
+      Map<String, dynamic>? forecast;
+      try {
+        forecast = await _predictionService.fetchDeviceForecast(deviceId);
+      } catch (e) {
+        // Retry once after 5s for 503 (model may be loading after cold start)
+        if (e.toString().contains('503')) {
+          await Future<void>.delayed(const Duration(seconds: 5));
+          if (!mounted) return;
+          forecast = await _predictionService.fetchDeviceForecast(deviceId);
+        } else {
+          rethrow;
+        }
+      }
       if (!mounted) return;
       final warning = forecast['warning'] as String?;
       setState(() {
@@ -164,7 +196,7 @@ class _DevicesPageState extends State<DevicesPage> {
       if (!mounted) return;
       String msg = e.toString();
       if (msg.contains('503')) {
-        msg = 'LSTM model is still loading. Please try again in a moment.';
+        msg = 'LSTM model is still loading. Please pull to refresh.';
       } else if (msg.contains('400')) {
         msg = 'Not enough energy data for this device to generate a forecast.';
       } else if (msg.contains('TimeoutException') ||
@@ -184,7 +216,39 @@ class _DevicesPageState extends State<DevicesPage> {
       _comparisonError = null;
     });
     try {
-      final comparison = await _predictionService.fetchDeviceComparison();
+      // Avoid 503: check model readiness before calling prediction API
+      final manager = MLTrainingManager.instance;
+      await manager.refreshStatus();
+      if (manager.isTraining) {
+        if (!mounted) return;
+        setState(() {
+          _comparisonError = 'Model training in progress. Please pull to refresh when done.';
+          _comparisonLoading = false;
+        });
+        return;
+      }
+      if (!manager.isModelReady) {
+        if (!mounted) return;
+        setState(() {
+          _comparisonError = 'Model not ready. Pull to refresh to retry.';
+          _comparisonLoading = false;
+        });
+        return;
+      }
+
+      Map<String, dynamic>? comparison;
+      try {
+        comparison = await _predictionService.fetchDeviceComparison();
+      } catch (e) {
+        // Retry once after 5s for 503 (model may be loading after cold start)
+        if (e.toString().contains('503')) {
+          await Future<void>.delayed(const Duration(seconds: 5));
+          if (!mounted) return;
+          comparison = await _predictionService.fetchDeviceComparison();
+        } else {
+          rethrow;
+        }
+      }
       if (!mounted) return;
       setState(() {
         _deviceComparison = comparison;
@@ -194,7 +258,7 @@ class _DevicesPageState extends State<DevicesPage> {
       if (!mounted) return;
       String msg = e.toString();
       if (msg.contains('503')) {
-        msg = 'LSTM model is still loading. Please pull to refresh.';
+        msg = 'LSTM model not trained yet. Pull to refresh after training completes.';
       } else if (msg.contains('TimeoutException') ||
           msg.contains('timed out')) {
         msg = 'Comparison request timed out. Try refreshing.';
