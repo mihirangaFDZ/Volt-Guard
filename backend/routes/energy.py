@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, HTTPException
@@ -10,30 +10,6 @@ from database import energy_col, anomaly_col, devices_col
 from utils.jwt_handler import get_current_user
 
 logger = logging.getLogger(__name__)
-
-# Sri Lankan timezone (UTC+5:30)
-SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
-
-
-def _convert_ts_to_srilanka(doc: dict):
-    """Convert timestamp fields to Sri Lankan timezone (UTC+5:30) as ISO strings."""
-    for key in ("received_at", "receivedAt", "timestamp", "created_at"):
-        val = doc.get(key)
-        if val is None:
-            continue
-        if isinstance(val, datetime):
-            dt = val
-        elif isinstance(val, str):
-            try:
-                dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-            except Exception:
-                continue
-        else:
-            continue
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        doc[key] = dt.astimezone(SRI_LANKA_TZ).isoformat()
-
 
 router = APIRouter(
     prefix="/energy",
@@ -281,6 +257,16 @@ def _parse_ts(raw) -> Optional[datetime]:
     return None
 
 
+def _serialize_doc_timestamps(doc: dict) -> dict:
+    """Ensure received_at (and similar timestamps) are ISO strings with Z (UTC) for frontend."""
+    out = dict(doc)
+    for key in ("received_at", "receivedAt", "timestamp", "created_at"):
+        val = out.get(key)
+        if isinstance(val, datetime):
+            out[key] = val.isoformat() + "Z" if val.tzinfo is None else val.isoformat()
+    return out
+
+
 def _integrate_energy_kwh(readings: List[Dict]) -> Dict[str, Dict]:
     """Compute approximate energy (kWh) per location using trapezoidal integration over current/voltage."""
     per_loc_points: Dict[str, List[Dict]] = {}
@@ -353,10 +339,7 @@ def get_latest_energy(
         .sort(_timestamp_sort_fields())
         .limit(limit)
     )
-    docs = list(cursor)
-    for doc in docs:
-        _convert_ts_to_srilanka(doc)
-    return docs
+    return [_serialize_doc_timestamps(d) for d in cursor]
 
 
 @router.get("/by-location")
@@ -379,10 +362,7 @@ def get_latest_energy_by_location(module: Optional[str] = None):
         ]
     )
 
-    docs = list(energy_col.aggregate(pipeline))
-    for doc in docs:
-        _convert_ts_to_srilanka(doc)
-    return docs
+    return [_serialize_doc_timestamps(d) for d in energy_col.aggregate(pipeline)]
 
 
 @router.get("/usage")
