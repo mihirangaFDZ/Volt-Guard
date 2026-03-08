@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'api_config.dart';
 import 'auth_service.dart';
 
-/// AI-driven energy optimization recommendations
+/// AI-driven energy optimization recommendations (user-understandable)
 class AIRecommendation {
   final String type;
   final String title;
@@ -20,6 +20,12 @@ class AIRecommendation {
   final int? vacancyDurationMinutes;
   final int? rcwl;
   final int? pir;
+  /// How to use devices correctly
+  final String? advice;
+  /// Energy wasted (kWh per day) so user sees impact
+  final double? energyWastedKwhPerDay;
+  /// How to mitigate the issue
+  final String? mitigation;
 
   AIRecommendation({
     required this.type,
@@ -36,6 +42,9 @@ class AIRecommendation {
     this.vacancyDurationMinutes,
     this.rcwl,
     this.pir,
+    this.advice,
+    this.energyWastedKwhPerDay,
+    this.mitigation,
   });
 
   factory AIRecommendation.fromJson(Map<String, dynamic> json) {
@@ -54,6 +63,9 @@ class AIRecommendation {
       vacancyDurationMinutes: json['vacancy_duration_minutes'] as int?,
       rcwl: json['rcwl'] as int?,
       pir: json['pir'] as int?,
+      advice: json['advice'] as String?,
+      energyWastedKwhPerDay: (json['energy_wasted_kwh_per_day'] as num?)?.toDouble(),
+      mitigation: json['mitigation'] as String?,
     );
   }
 }
@@ -123,7 +135,7 @@ class OptimizationService {
 
     final response = await http
         .get(uri, headers: headers)
-        .timeout(ApiConfig.requestTimeout);
+        .timeout(ApiConfig.analyticsRequestTimeout);
 
     if (response.statusCode == 200) {
       final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;

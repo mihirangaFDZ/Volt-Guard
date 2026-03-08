@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/current_reading_recommendation.dart';
 import '../models/energy_reading.dart';
 import '../models/sensor_reading.dart';
 import '../services/analytics_service.dart';
@@ -49,13 +50,32 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   // Occupancy stats
   Map<String, dynamic>? _occupancyStats;
 
-  // Auto-refresh timer for live updates
+  // Auto-refresh timer for live updates (no full-page refresh)
   Timer? _autoRefreshTimer;
   static const Duration _autoRefreshInterval = Duration(seconds: 30);
-  
+  bool _initialLoadDone = false;
+  DateTime? _lastUpdated;
+
   // AI Recommendations
   OptimizationResponse? _aiRecommendations;
   bool _loadingAIRecommendations = false;
+
+  // Current energy recommendations from trained model (CSV dataset)
+  List<CurrentReadingRecommendation>? _modelCurrentRecs;
+
+  // Energy advice: refresh recommendations every N minutes (default 5), save to history
+  static const List<int> _recommendationIntervalOptions = [1, 5, 10, 15, 30];
+  int _recommendationIntervalMinutes = 5;
+  Timer? _recommendationTimer;
+  DateTime? _lastRecommendationSave;
+
+  // Energy advice history (previous recommendations with readings)
+  List<Map<String, dynamic>> _energyAdviceHistory = [];
+  bool _loadingHistory = false;
+  bool _historySectionExpanded = true;
+  final Set<String> _selectedHistoryIds = {};
+  DateTime? _historyFilterFrom;
+  DateTime? _historyFilterTo;
 
   @override
   void initState() {
@@ -63,11 +83,13 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     _loadFilters();
     _loadReadings();
     _startAutoRefresh();
+    _startRecommendationRefresh();
   }
 
   @override
   void dispose() {
     _autoRefreshTimer?.cancel();
+    _recommendationTimer?.cancel();
     super.dispose();
   }
 
@@ -78,6 +100,128 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         _loadReadings();
       }
     });
+  }
+
+  void _startRecommendationRefresh() {
+    _recommendationTimer?.cancel();
+    // First run after 15s so initial data is loaded; then every N minutes
+    Future.delayed(const Duration(seconds: 15), () {
+      if (mounted) _refreshRecommendationsAndSave();
+    });
+    _recommendationTimer = Timer.periodic(
+      Duration(minutes: _recommendationIntervalMinutes),
+      (_) => _refreshRecommendationsAndSave(),
+    );
+  }
+
+  /// Refresh energy recommendations and save current batch to history.
+  Future<void> _refreshRecommendationsAndSave() async {
+    if (!mounted || _energyReadings.isEmpty) return;
+    final latest = _energyReadings.first;
+    final trend = _energyUsage?['trend'] as Map<String, dynamic>?;
+    final signal = _energyUsage?['signal'] as Map<String, dynamic>?;
+    List<CurrentReadingRecommendation> recs;
+    try {
+      final recMaps = await _analyticsService.fetchCurrentEnergyRecommendations(
+        currentA: latest.currentA,
+        currentMa: latest.currentMa,
+        powerW: latest.currentA * 230.0,
+        trendDirection: trend?['direction'] as String? ?? 'stable',
+        trendPercentChange: (trend?['percent_change'] as num?)?.toDouble() ?? 0.0,
+        signalQuality: signal?['quality'] as String? ?? 'unknown',
+      );
+      recs = recMaps.isNotEmpty
+          ? recMaps.map((e) => CurrentReadingRecommendation.fromApiMap(e)).toList()
+          : CurrentReadingRecommendation.fromReadingsAndStats(
+              readings: _energyReadings,
+              usageStats: _energyUsage,
+            );
+    } catch (_) {
+      recs = CurrentReadingRecommendation.fromReadingsAndStats(
+        readings: _energyReadings,
+        usageStats: _energyUsage,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _modelCurrentRecs = recs;
+    });
+    final snapshot = {
+      'current_a': latest.currentA,
+      'current_ma': latest.currentMa,
+      'power_w': latest.currentA * 230.0,
+      'trend_direction': trend?['direction'] ?? 'stable',
+      'trend_percent_change': trend?['percent_change'] ?? 0.0,
+      'signal_quality': signal?['quality'],
+      'location': latest.location,
+      'module': latest.module,
+    };
+    final recPayload = recs.map((r) {
+      return {
+        'title': r.title,
+        'message': r.message,
+        'severity': r.severity,
+        'advice': r.advice,
+        'mitigation': r.mitigation,
+        'estimated_savings_kwh_per_day': r.estimatedSavingsKwhPerDay,
+        'energy_wasted_kwh_per_day': r.energyWastedKwhPerDay,
+      };
+    }).toList();
+    try {
+      await _analyticsService.saveEnergyAdviceHistory(
+        readingsSnapshot: snapshot,
+        recommendations: recPayload,
+      );
+      if (mounted) setState(() => _lastRecommendationSave = DateTime.now());
+    } catch (_) {}
+    _loadEnergyAdviceHistory();
+  }
+
+  Future<void> _loadEnergyAdviceHistory() async {
+    if (!mounted) return;
+    setState(() => _loadingHistory = true);
+    try {
+      final items = await _analyticsService.fetchEnergyAdviceHistory(limit: 50);
+      if (!mounted) return;
+      setState(() {
+        _energyAdviceHistory = items;
+        _loadingHistory = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingHistory = false);
+    }
+  }
+
+  List<Map<String, dynamic>> get _filteredHistory {
+    if (_historyFilterFrom == null && _historyFilterTo == null) {
+      return _energyAdviceHistory;
+    }
+    return _energyAdviceHistory.where((item) {
+      final created = item['created_at'] as String?;
+      if (created == null) return false;
+      final dt = DateTime.tryParse(created);
+      if (dt == null) return false;
+      if (_historyFilterFrom != null) {
+        final fromStart = DateTime(_historyFilterFrom!.year, _historyFilterFrom!.month, _historyFilterFrom!.day);
+        if (dt.isBefore(fromStart)) return false;
+      }
+      if (_historyFilterTo != null) {
+        final toEnd = DateTime(_historyFilterTo!.year, _historyFilterTo!.month, _historyFilterTo!.day, 23, 59, 59);
+        if (dt.isAfter(toEnd)) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  Future<void> _deleteSelectedHistory() async {
+    if (_selectedHistoryIds.isEmpty) return;
+    final ids = _selectedHistoryIds.toList();
+    try {
+      await _analyticsService.deleteEnergyAdviceHistory(ids);
+      if (!mounted) return;
+      setState(() => _selectedHistoryIds.clear());
+      await _loadEnergyAdviceHistory();
+    } catch (_) {}
   }
 
   Future<void> _reloadAllData() async {
@@ -102,75 +246,122 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   Future<void> _loadReadings() async {
     try {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-
-      final dataFuture = _analyticsService.fetchLatestReadings(
-        limit: 50,
-        location: _selectedLocation,
-        module: _selectedModule,
-        deviceId: _selectedDeviceId,
-      );
-      final occupancyFuture = _analyticsService.fetchOccupancyStats(
-        limit: 50,
-        location: _selectedLocation,
-        module: _selectedModule,
-        deviceId: _selectedDeviceId,
-      );
-
-      // Use new analytics endpoint for curent energy data
-      final energyStatsFuture = _analyticsService.fetchCurrentEnergyStats(
-        limit: 120,
-        location: _selectedLocation,
-        module: _selectedModule,
-        deviceId: _selectedDeviceId,
-      );
-
-      final data = await dataFuture;
-
-      Map<String, dynamic>? occupancyStats;
-      try {
-        occupancyStats = await occupancyFuture;
-      } catch (_) {
-        // Occupancy stats are optional and should not block the view.
+      // Only show full-page loading on very first load; later updates are live (no refresh)
+      final isInitialLoad = !_initialLoadDone;
+      if (isInitialLoad) {
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
       }
 
+      // Run main analytics requests in parallel to avoid sequential timeouts (60s total)
+      List<SensorReading> data = [];
+      Map<String, dynamic>? occupancyStats;
       Map<String, dynamic>? energyStats;
       List<EnergyReading> energyReadings = [];
-      try {
-        energyStats = await energyStatsFuture;
-        // Extract readings from the latest data if available
-        if (energyStats != null && energyStats['latest'] != null) {
-          energyReadings = [
-            EnergyReading.fromJson(
-                Map<String, dynamic>.from(energyStats['latest'] as Map))
-          ];
-        }
-      } catch (_) {
-        // Curent energy data is optional for the environment tab.
-      }
+
+      await Future.wait([
+        _analyticsService
+            .fetchLatestReadings(
+              limit: 50,
+              location: _selectedLocation,
+              module: _selectedModule,
+              deviceId: _selectedDeviceId,
+            )
+            .then((v) {
+              data = v;
+              return v;
+            })
+            .catchError((_) {
+              data = [];
+              return <SensorReading>[];
+            }),
+        _analyticsService
+            .fetchOccupancyStats(
+              limit: 50,
+              location: _selectedLocation,
+              module: _selectedModule,
+              deviceId: _selectedDeviceId,
+            )
+            .then((v) {
+              occupancyStats = v;
+              return v;
+            })
+            .catchError((_) {
+              occupancyStats = null;
+              return <String, dynamic>{};
+            }),
+        _analyticsService
+            .fetchCurrentEnergyStats(
+              limit: 120,
+              location: _selectedLocation,
+              module: _selectedModule,
+              deviceId: _selectedDeviceId,
+            )
+            .then((v) {
+              energyStats = v;
+              if (v != null) {
+                final rawReadings = v['readings'] as List<dynamic>?;
+                if (rawReadings != null && rawReadings.isNotEmpty) {
+                  energyReadings = rawReadings
+                      .map((e) => EnergyReading.fromJson(
+                          Map<String, dynamic>.from(e as Map)))
+                      .toList();
+                  energyReadings.sort(
+                      (a, b) => b.receivedAt.compareTo(a.receivedAt));
+                } else if (v['latest'] != null) {
+                  energyReadings = [
+                    EnergyReading.fromJson(
+                        Map<String, dynamic>.from(v['latest'] as Map))
+                  ];
+                }
+              }
+              return v;
+            })
+            .catchError((_) {
+              energyStats = null;
+              energyReadings = [];
+              return <String, dynamic>{};
+            }),
+      ]).timeout(
+        const Duration(seconds: 60),
+        onTimeout: () {
+          // Return partial results if timeout; data may still be empty
+          throw TimeoutException(
+            'Analytics request took too long. Check your connection and try again.',
+            const Duration(seconds: 60),
+          );
+        },
+      );
 
       _DerivedStats? stats;
       if (data.isNotEmpty) {
         stats = _deriveStats(data);
       }
       if (!mounted) return;
-      
-      // Fetch AI recommendations
+
+      // Fetch AI recommendations (show loading only when we don't have any yet)
       OptimizationResponse? aiRecsResponse;
+      final showAILoading = _aiRecommendations == null;
       try {
-        setState(() {
-          _loadingAIRecommendations = true;
-        });
+        if (showAILoading) {
+          setState(() {
+            _loadingAIRecommendations = true;
+          });
+        }
         aiRecsResponse = await _optimizationService.fetchRecommendations(
           days: 2,
-          location: _selectedLocation,
-          module: _selectedModule,
+          location: _selectedLocation ??
+              (energyReadings.isNotEmpty
+                  ? energyReadings.first.location
+                  : null),
+          module: _selectedModule ??
+              (energyReadings.isNotEmpty
+                  ? energyReadings.first.module
+                  : null),
         );
       } catch (e) {
-        // If AI recommendations fail, show empty list
         if (!mounted) return;
         setState(() {
           _loadingAIRecommendations = false;
@@ -178,10 +369,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         });
       } finally {
         if (!mounted) return;
-        if (_loadingAIRecommendations) {
+        if (showAILoading) {
           setState(() {
             _loadingAIRecommendations = false;
-            _aiRecommendations = aiRecsResponse;
           });
         }
       }
@@ -229,17 +419,46 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           ));
         }
       }
-      
+
+      // Fetch current energy recommendations from trained model (CSV dataset)
+      List<CurrentReadingRecommendation>? modelRecs;
+      if (energyReadings.isNotEmpty) {
+        try {
+          final latest = energyReadings.first;
+          final trend = energyStats?['trend'] as Map<String, dynamic>?;
+          final signal = energyStats?['signal'] as Map<String, dynamic>?;
+          final recMaps = await _analyticsService.fetchCurrentEnergyRecommendations(
+            currentA: latest.currentA,
+            currentMa: latest.currentMa,
+            powerW: latest.currentA * 230.0,
+            trendDirection: trend?['direction'] as String? ?? 'stable',
+            trendPercentChange: (trend?['percent_change'] as num?)?.toDouble() ?? 0.0,
+            signalQuality: signal?['quality'] as String? ?? 'unknown',
+          );
+          if (recMaps.isNotEmpty) {
+            modelRecs = recMaps
+                .map((e) => CurrentReadingRecommendation.fromApiMap(e))
+                .toList();
+          }
+        } catch (_) {
+          // Fall back to rule-based if model API fails
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _readings = data;
         _energyReadings = energyReadings;
-        _energyUsage = energyStats; // Store the full stats object
+        _energyUsage = energyStats;
         _occupancyStats = occupancyStats;
+        _aiRecommendations = aiRecsResponse;
+        _modelCurrentRecs = modelRecs;
         final recItems = aiRecs.map((r) => _RecItem(rec: r)).toList();
         _activeRecItems = recItems.take(_maxActiveRecs).toList();
         _backlogRecs = recItems.skip(_maxActiveRecs).map((item) => item.rec).toList();
         _history = [];
+        _initialLoadDone = true;
+        _lastUpdated = DateTime.now();
       });
     } catch (e) {
       if (!mounted) return;
@@ -259,6 +478,25 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Analytics & Recommendations'),
+        actions: [
+          if (_initialLoadDone && _lastUpdated != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.fiber_manual_record, size: 8, color: Colors.green[400]),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Live',
+                      style: TextStyle(fontSize: 12, color: Colors.green[700]),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _reloadAllData,
@@ -378,13 +616,576 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       selectedLocation: _selectedLocation,
     );
 
+    // Use trained model recommendations when available, else rule-based
+    final List<CurrentReadingRecommendation> currentRecs =
+        (_modelCurrentRecs != null && _modelCurrentRecs!.isNotEmpty)
+            ? _modelCurrentRecs!
+            : CurrentReadingRecommendation.fromReadingsAndStats(
+                readings: _energyReadings,
+                usageStats: _energyUsage,
+              );
+
+    if (_energyAdviceHistory.isEmpty && !_loadingHistory) {
+      _loadEnergyAdviceHistory();
+    }
     return [
       _buildCurentEnergyHeader(stats),
       const SizedBox(height: 16),
       _buildCurentEnergyMetrics(stats),
       const SizedBox(height: 16),
+      _buildCurrentReadingRecommendations(currentRecs),
+      const SizedBox(height: 16),
+      _buildEnergyAdviceHistorySection(),
+      const SizedBox(height: 16),
+      if (_aiRecommendations != null &&
+          _aiRecommendations!.recommendations.isNotEmpty) ...[
+        _buildAIRecommendations(),
+        const SizedBox(height: 16),
+      ],
       _buildCurentEnergyReadings(_energyReadings),
     ];
+  }
+
+  Widget _buildCurrentReadingRecommendations(
+      List<CurrentReadingRecommendation> recs) {
+    if (recs.isEmpty) return const SizedBox.shrink();
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.energy_savings_leaf, color: Colors.green),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Energy advice & recommendations',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                DropdownButton<int>(
+                  value: _recommendationIntervalMinutes,
+                  isDense: true,
+                  underline: const SizedBox(),
+                  items: _recommendationIntervalOptions
+                      .map((m) => DropdownMenuItem<int>(
+                            value: m,
+                            child: Text('Every $m min'),
+                          ))
+                      .toList(),
+                  onChanged: (int? value) {
+                    if (value == null) return;
+                    setState(() {
+                      _recommendationIntervalMinutes = value;
+                      _startRecommendationRefresh();
+                    });
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Use devices correctly, see how much you can save, and how to fix issues. Recommendations refresh every $_recommendationIntervalMinutes min and are saved to history.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withOpacity(0.7),
+              ),
+            ),
+            if (_lastRecommendationSave != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Last saved: ${_friendlyTime(_lastRecommendationSave!)}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withOpacity(0.6),
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            ...recs.map((r) => _buildUserFriendlyRecCard(
+                  title: r.title,
+                  message: r.message,
+                  severity: r.severity,
+                  icon: r.icon,
+                  color: r.color,
+                  savingsKwhPerDay: r.estimatedSavingsKwhPerDay,
+                  wastedKwhPerDay: r.energyWastedKwhPerDay,
+                  advice: r.advice,
+                  mitigation: r.mitigation,
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEnergyAdviceHistorySection() {
+    final filtered = _filteredHistory;
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InkWell(
+              onTap: () {
+                setState(() {
+                  _historySectionExpanded = !_historySectionExpanded;
+                });
+              },
+              child: Row(
+                children: [
+                  Icon(
+                    _historySectionExpanded ? Icons.expand_less : Icons.expand_more,
+                    color: Colors.blue,
+                    size: 28,
+                  ),
+                  const Icon(Icons.history, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Previous recommendations (history)',
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  if (_loadingHistory)
+                    const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    IconButton(
+                      icon: const Icon(Icons.refresh),
+                      onPressed: _loadEnergyAdviceHistory,
+                      tooltip: 'Refresh history',
+                    ),
+                ],
+              ),
+            ),
+            if (_historySectionExpanded) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Read previous energy advice and the readings they were based on.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withOpacity(0.7),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Date filter row
+              Row(
+                children: [
+                  Text(
+                    'Date filter:',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.7),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: _historyFilterFrom ?? DateTime.now(),
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime.now(),
+                      );
+                      if (date != null && mounted) {
+                        setState(() => _historyFilterFrom = date);
+                      }
+                    },
+                    icon: const Icon(Icons.calendar_today, size: 18),
+                    label: Text(
+                      _historyFilterFrom != null
+                          ? '${_historyFilterFrom!.day}/${_historyFilterFrom!.month}/${_historyFilterFrom!.year}'
+                          : 'From',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: _historyFilterTo ?? DateTime.now(),
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime.now(),
+                      );
+                      if (date != null && mounted) {
+                        setState(() => _historyFilterTo = date);
+                      }
+                    },
+                    icon: const Icon(Icons.calendar_today, size: 18),
+                    label: Text(
+                      _historyFilterTo != null
+                          ? '${_historyFilterTo!.day}/${_historyFilterTo!.month}/${_historyFilterTo!.year}'
+                          : 'To',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _historyFilterFrom = null;
+                        _historyFilterTo = null;
+                      });
+                    },
+                    child: const Text('Clear'),
+                  ),
+                ],
+              ),
+              // Select all / Deselect / Delete selected
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: filtered.isEmpty
+                        ? null
+                        : () {
+                            setState(() {
+                              for (final item in filtered) {
+                                final id = item['id'] as String?;
+                                if (id != null) _selectedHistoryIds.add(id);
+                              }
+                            });
+                          },
+                    child: const Text('Select all'),
+                  ),
+                  TextButton(
+                    onPressed: _selectedHistoryIds.isEmpty ? null : () {
+                      setState(() => _selectedHistoryIds.clear());
+                    },
+                    child: const Text('Deselect all'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: _selectedHistoryIds.isEmpty
+                        ? null
+                        : () async {
+                            await _deleteSelectedHistory();
+                          },
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: Text('Delete selected (${_selectedHistoryIds.length})'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (_energyAdviceHistory.isEmpty && !_loadingHistory)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Center(
+                    child: Text(
+                      'No history yet. Recommendations are saved every $_recommendationIntervalMinutes min.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.6),
+                      ),
+                    ),
+                  ),
+                )
+              else if (filtered.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(
+                    child: Text('No entries match the date filter.'),
+                  ),
+                )
+              else
+                ...filtered.take(30).map((item) {
+                  final id = item['id'] as String? ?? '';
+                  final created = item['created_at'] as String?;
+                  final snapshot = item['readings_snapshot'] as Map<String, dynamic>?;
+                  final recs = item['recommendations'] as List<dynamic>? ?? [];
+                  final powerW = snapshot != null
+                      ? (snapshot['power_w'] as num?)?.toDouble()
+                      : null;
+                  final currentA = snapshot != null
+                      ? (snapshot['current_a'] as num?)?.toDouble()
+                      : null;
+                  final trend = snapshot != null
+                      ? snapshot['trend_direction'] as String?
+                      : null;
+                  final selected = _selectedHistoryIds.contains(id);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(10),
+                        border: selected
+                            ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
+                            : null,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: selected,
+                                onChanged: (v) {
+                                  setState(() {
+                                    if (v == true) {
+                                      _selectedHistoryIds.add(id);
+                                    } else {
+                                      _selectedHistoryIds.remove(id);
+                                    }
+                                  });
+                                },
+                              ),
+                              Icon(Icons.schedule,
+                                  size: 16,
+                                  color: Theme.of(context).colorScheme.primary),
+                              const SizedBox(width: 6),
+                              Text(
+                                created != null
+                                    ? _friendlyTime(DateTime.tryParse(created) ?? DateTime.now())
+                                    : '—',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (snapshot != null) ...[
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: [
+                                if (currentA != null)
+                                  _pill('${currentA.toStringAsFixed(2)} A'),
+                                if (powerW != null)
+                                  _pill('${powerW.toStringAsFixed(0)} W'),
+                                if (trend != null) _pill('Trend: $trend'),
+                              ],
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          ...recs.take(5).map((r) {
+                            final map = r as Map<String, dynamic>;
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.arrow_right,
+                                    size: 16,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withOpacity(0.6),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      map['title'] as String? ?? '',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurface
+                                            .withOpacity(0.85),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                          if (recs.length > 5)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                '+ ${recs.length - 5} more',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withOpacity(0.6),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// One user-understandable recommendation block: issue, advice, savings, waste, mitigate.
+  Widget _buildUserFriendlyRecCard({
+    required String title,
+    required String message,
+    required String severity,
+    required IconData icon,
+    required Color color,
+    double? savingsKwhPerDay,
+    double? wastedKwhPerDay,
+    String? advice,
+    String? mitigation,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, color: color, size: 24),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          color: color,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        message,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(0.85),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (advice != null && advice.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _recLabel(Icons.tips_and_updates, 'How to use devices correctly'),
+              const SizedBox(height: 4),
+              Text(
+                advice,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withOpacity(0.8),
+                  height: 1.35,
+                ),
+              ),
+            ],
+            if (wastedKwhPerDay != null && wastedKwhPerDay > 0) ...[
+              const SizedBox(height: 10),
+              _recLabel(Icons.warning_amber_rounded, 'How much your device is wasting'),
+              const SizedBox(height: 4),
+              Text(
+                'About ${wastedKwhPerDay.toStringAsFixed(2)} kWh per day (${(wastedKwhPerDay * 30).toStringAsFixed(1)} kWh per month if this continues).',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.orange[800],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+            if (savingsKwhPerDay != null && savingsKwhPerDay > 0) ...[
+              const SizedBox(height: 10),
+              _recLabel(Icons.savings, 'Energy you can save'),
+              const SizedBox(height: 4),
+              Text(
+                'Up to ${savingsKwhPerDay.toStringAsFixed(2)} kWh per day by following the advice below.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.green[700],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+            if (mitigation != null && mitigation.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _recLabel(Icons.build_circle, 'How to fix it'),
+              const SizedBox(height: 4),
+              Text(
+                mitigation,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withOpacity(0.8),
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _recLabel(IconData icon, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+      ],
+    );
   }
 
   SensorReading _latestReading(List<SensorReading> readings) {
@@ -1268,10 +2069,21 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 Icon(Icons.psychology, color: Colors.purple),
                 SizedBox(width: 8),
                 Text(
-                  'AI Energy Recommendations',
+                  'AI energy advice (trained model)',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
               ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Recommendations from the trained model: how to use devices, how much you waste, and how to fix it.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withOpacity(0.7),
+              ),
             ),
             if (_aiRecommendations!.potentialSavingsKwhPerDay > 0) ...[
               const SizedBox(height: 12),
@@ -1346,7 +2158,6 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Widget _buildAIRecommendationTile(AIRecommendation rec) {
     Color severityColor;
     IconData iconData;
-    
     switch (rec.severity.toLowerCase()) {
       case 'high':
         severityColor = Colors.red;
@@ -1360,82 +2171,18 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         severityColor = Colors.blue;
         iconData = Icons.lightbulb_outline;
     }
-
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: severityColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(iconData, color: severityColor, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        rec.title,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: severityColor.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        rec.severity.toUpperCase(),
-                        style: TextStyle(
-                          color: severityColor,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  rec.message,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[700],
-                  ),
-                ),
-                if (rec.estimatedSavings > 0) ...[
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(Icons.savings, size: 14, color: Colors.green[700]),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${rec.estimatedSavings.toStringAsFixed(2)} kWh/day',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.green[700],
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
+      padding: const EdgeInsets.only(bottom: 16),
+      child: _buildUserFriendlyRecCard(
+        title: rec.title,
+        message: rec.message,
+        severity: rec.severity,
+        icon: iconData,
+        color: severityColor,
+        savingsKwhPerDay: rec.estimatedSavings > 0 ? rec.estimatedSavings : null,
+        wastedKwhPerDay: rec.energyWastedKwhPerDay,
+        advice: rec.advice,
+        mitigation: rec.mitigation,
       ),
     );
   }

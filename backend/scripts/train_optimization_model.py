@@ -1,6 +1,12 @@
 """
-Standalone script to train the AI energy optimization model
+Standalone script to train the AI energy optimization model.
+Training produces accurate, user-understandable recommendations:
+- How to use devices correctly
+- How much energy is wasted
+- How to save energy and mitigate issues
+
 Usage: python scripts/train_optimization_model.py
+Run after you have at least 2-7 days of energy_readings + occupancy data.
 """
 
 import sys
@@ -13,21 +19,19 @@ from app.services.energy_optimizer import EnergyOptimizer
 
 
 def main():
-    """Train the energy optimization model"""
+    """Train the energy optimization model for accurate recommendations."""
     print("=" * 70)
     print("AI Energy Optimization Model Training")
     print("=" * 70)
     
-    # Initialize optimizer
     optimizer = EnergyOptimizer()
     
-    # Train model
     try:
         results = optimizer.train_model(
-            days=7,  # Use 7 days of data
-            location=None,  # Use all locations
-            module=None,  # Use all modules
-            model_type='random_forest',  # or 'gradient_boosting'
+            days=7,  # Use 7 days for more accurate predictions and recommendations
+            location=None,
+            module=None,
+            model_type='random_forest',
             test_size=0.2,
             target_column='energy_watts'
         )

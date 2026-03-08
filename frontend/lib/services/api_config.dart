@@ -33,6 +33,8 @@ class ApiConfig {
   
   // Request timeout duration
   static const Duration requestTimeout = Duration(seconds: 30);
+  // Longer timeout for analytics/optimization (backend may be slow)
+  static const Duration analyticsRequestTimeout = Duration(seconds: 60);
 
   // Environment-specific configurations
   static bool get isDevelopment => _environment == Environment.development;

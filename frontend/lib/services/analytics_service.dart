@@ -33,8 +33,9 @@ class AnalyticsService {
         Uri.parse('${ApiConfig.baseUrl}${ApiConfig.analyticsEndpoint}/latest')
             .replace(queryParameters: query);
 
-    final response =
-        await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
+    final response = await http
+        .get(uri, headers: headers)
+        .timeout(ApiConfig.analyticsRequestTimeout);
 
     if (response.statusCode == 200) {
       final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
@@ -96,8 +97,9 @@ class AnalyticsService {
             '${ApiConfig.baseUrl}${ApiConfig.analyticsEndpoint}/occupancy-stats')
         .replace(queryParameters: query);
 
-    final response =
-        await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
+    final response = await http
+        .get(uri, headers: headers)
+        .timeout(ApiConfig.analyticsRequestTimeout);
 
     if (response.statusCode == 200) {
       final Map<String, dynamic> data =
@@ -158,8 +160,9 @@ class AnalyticsService {
             '${ApiConfig.baseUrl}${ApiConfig.analyticsEndpoint}/current-energy-stats')
         .replace(queryParameters: query);
 
-    final response =
-        await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
+    final response = await http
+        .get(uri, headers: headers)
+        .timeout(ApiConfig.analyticsRequestTimeout);
 
     if (response.statusCode == 200) {
       final Map<String, dynamic> data =
@@ -169,6 +172,47 @@ class AnalyticsService {
 
     throw Exception(
         'Failed to load current energy stats (${response.statusCode})');
+  }
+
+  /// Fetch current energy recommendations from the trained model (CSV-dataset).
+  /// Uses current_a, trend and signal from the latest reading for accurate recommendations.
+  Future<List<Map<String, dynamic>>> fetchCurrentEnergyRecommendations({
+    required double currentA,
+    double? currentMa,
+    double? powerW,
+    String trendDirection = 'stable',
+    double trendPercentChange = 0.0,
+    String signalQuality = 'unknown',
+  }) async {
+    final headers = await _authService.getAuthHeaders();
+    headers['Accept'] = 'application/json';
+
+    final query = <String, String>{
+      'current_a': currentA.toString(),
+      'trend_direction': trendDirection,
+      'trend_percent_change': trendPercentChange.toString(),
+      'signal_quality': signalQuality,
+    };
+    if (currentMa != null) query['current_ma'] = currentMa.toString();
+    if (powerW != null) query['power_w'] = powerW.toString();
+
+    final uri = Uri.parse(
+            '${ApiConfig.baseUrl}${ApiConfig.analyticsEndpoint}/current-energy-recommendations')
+        .replace(queryParameters: query);
+
+    final response = await http
+        .get(uri, headers: headers)
+        .timeout(ApiConfig.analyticsRequestTimeout);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data =
+          jsonDecode(response.body) as Map<String, dynamic>;
+      final List<dynamic> recs = data['recommendations'] as List<dynamic>? ?? [];
+      return recs
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    }
+    return [];
   }
 
   Future<List<Map<String, dynamic>>> fetchDevices() async {
@@ -191,5 +235,84 @@ class AnalyticsService {
     }
 
     throw Exception('Failed to load devices (${response.statusCode})');
+  }
+
+  /// Save energy advice and recommendations with readings snapshot to history.
+  Future<bool> saveEnergyAdviceHistory({
+    required Map<String, dynamic> readingsSnapshot,
+    required List<Map<String, dynamic>> recommendations,
+  }) async {
+    final headers = await _authService.getAuthHeaders();
+    headers['Accept'] = 'application/json';
+
+    final uri = Uri.parse(
+        '${ApiConfig.baseUrl}${ApiConfig.analyticsEndpoint}/energy-advice-history');
+
+    final response = await http
+        .post(
+          uri,
+          headers: headers,
+          body: jsonEncode({
+            'readings_snapshot': readingsSnapshot,
+            'recommendations': recommendations,
+          }),
+        )
+        .timeout(ApiConfig.requestTimeout);
+
+    return response.statusCode == 200;
+  }
+
+  /// Fetch energy advice history (previous recommendations with readings).
+  Future<List<Map<String, dynamic>>> fetchEnergyAdviceHistory({
+    int limit = 50,
+    String? since,
+    String? before,
+  }) async {
+    final headers = await _authService.getAuthHeaders();
+    headers['Accept'] = 'application/json';
+
+    final query = <String, String>{'limit': '$limit'};
+    if (since != null && since.isNotEmpty) query['since'] = since;
+    if (before != null && before.isNotEmpty) query['before'] = before;
+
+    final uri = Uri.parse(
+            '${ApiConfig.baseUrl}${ApiConfig.analyticsEndpoint}/energy-advice-history')
+        .replace(queryParameters: query);
+
+    final response =
+        await http.get(uri, headers: headers).timeout(ApiConfig.requestTimeout);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data =
+          jsonDecode(response.body) as Map<String, dynamic>;
+      final List<dynamic> items = data['items'] as List<dynamic>? ?? [];
+      return items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    }
+    return [];
+  }
+
+  /// Delete selected energy advice history entries by id.
+  Future<int> deleteEnergyAdviceHistory(List<String> ids) async {
+    if (ids.isEmpty) return 0;
+    final headers = await _authService.getAuthHeaders();
+    headers['Accept'] = 'application/json';
+
+    final uri = Uri.parse(
+        '${ApiConfig.baseUrl}${ApiConfig.analyticsEndpoint}/energy-advice-history');
+
+    final response = await http
+        .delete(
+          uri,
+          headers: headers,
+          body: jsonEncode({'ids': ids}),
+        )
+        .timeout(ApiConfig.requestTimeout);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data =
+          jsonDecode(response.body) as Map<String, dynamic>;
+      return data['deleted_count'] as int? ?? 0;
+    }
+    return 0;
   }
 }

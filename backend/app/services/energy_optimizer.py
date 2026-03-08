@@ -359,11 +359,12 @@ class EnergyOptimizer:
         # Recommendation 1: High energy consumption when vacant
         if is_occupied == 0 and current_energy > threshold_high:
             vacancy_hours = vacant_count * 0.5  # Assuming readings every 30 minutes
+            wasted_kwh = current_energy * 24 / 1000
             recommendations.append({
                 'type': 'high_priority',
-                'title': 'Turn off unused devices',
-                'message': f'Room is vacant but consuming {current_energy:.2f}W. Turn off AC and other devices to save energy.',
-                'estimated_savings': current_energy * 24 / 1000,  # kWh per day
+                'title': 'Devices left on in empty room',
+                'message': f'Room is vacant but still using {current_energy:.0f} W. That is about {wasted_kwh:.1f} kWh per day being wasted.',
+                'estimated_savings': wasted_kwh,
                 'severity': 'high',
                 'location': location,
                 'module': module,
@@ -374,16 +375,20 @@ class EnergyOptimizer:
                 'vacancy_duration_minutes': int(vacancy_hours * 60),
                 'rcwl': rcwl,
                 'pir': pir,
+                'advice': 'Always turn off AC, lights, and fans when leaving a room. Use timers or smart plugs to auto-off after a set time.',
+                'energy_wasted_kwh_per_day': wasted_kwh,
+                'mitigation': 'Go back and switch off AC and other appliances. For next time, use one switch for all room loads or enable "leave mode" if your system supports it.',
             })
         
         # Recommendation 2: Optimize AC temperature when occupied
         if current_temp is not None and current_temp > 30 and is_occupied == 1:
             if current_energy > threshold_high * 0.7:
+                savings = current_energy * 0.2 * 24 / 1000
                 recommendations.append({
                     'type': 'medium_priority',
-                    'title': 'Optimize AC temperature',
-                    'message': f'Temperature is {current_temp:.1f}°C while occupied. Consider setting AC to 24-27°C for better efficiency.',
-                    'estimated_savings': current_energy * 0.2 * 24 / 1000,  # 20% savings
+                    'title': 'AC set too cold — use correct temperature',
+                    'message': f'Room is {current_temp:.1f}°C while using {current_energy:.0f} W. Setting AC to 24–27°C saves energy and is still comfortable.',
+                    'estimated_savings': savings,
                     'severity': 'medium',
                     'location': location,
                     'module': module,
@@ -393,15 +398,19 @@ class EnergyOptimizer:
                     'is_occupied': bool(is_occupied),
                     'rcwl': rcwl,
                     'pir': pir,
+                    'advice': 'Set AC to 24–27°C when the room is occupied. Each degree lower can add about 5–8% to cooling cost.',
+                    'energy_wasted_kwh_per_day': savings,
+                    'mitigation': 'Increase the AC set temperature to 25–26°C and use fan mode if needed. Recheck the reading after 30 minutes.',
                 })
         
         # Recommendation 3: High humidity with high energy
         if current_humidity is not None and current_humidity > 70 and current_energy > threshold_high * 0.8:
+            savings = current_energy * 0.15 * 24 / 1000
             recommendations.append({
                 'type': 'medium_priority',
-                'title': 'Optimize humidity control',
-                'message': f'High humidity ({current_humidity:.0f}%) detected with high energy consumption. Consider adjusting AC settings or using dehumidifier.',
-                'estimated_savings': current_energy * 0.15 * 24 / 1000,  # 15% savings
+                'title': 'High humidity and high energy use',
+                'message': f'Humidity is {current_humidity:.0f}% and consumption is {current_energy:.0f} W. AC is working harder than needed.',
+                'estimated_savings': savings,
                 'severity': 'medium',
                 'location': location,
                 'module': module,
@@ -411,6 +420,9 @@ class EnergyOptimizer:
                 'is_occupied': bool(is_occupied),
                 'rcwl': rcwl,
                 'pir': pir,
+                'advice': 'Use AC in dry mode when humidity is high, or set a higher temperature. Avoid opening windows when AC is on.',
+                'energy_wasted_kwh_per_day': savings,
+                'mitigation': 'Switch AC to dry/dehumidify mode or set temp to 26°C. Ensure doors and windows are closed. Check again after an hour.',
             })
         
         # Recommendation 4: Motion sensor mismatch (RCWL vs PIR)
@@ -424,8 +436,8 @@ class EnergyOptimizer:
                 if mismatch_count >= 3:  # If it happens frequently
                     recommendations.append({
                         'type': 'low_priority',
-                        'title': 'Motion sensor alignment',
-                        'message': f'RCWL detected motion while PIR didn\'t in {mismatch_count} recent readings. Consider repositioning sensors for better accuracy.',
+                        'title': 'Motion sensors disagree — may mis-detect occupancy',
+                        'message': f'Sensors gave different results in {mismatch_count} recent readings. Lights or AC might stay on when the room is empty.',
                         'estimated_savings': 0,
                         'severity': 'low',
                         'location': location,
@@ -437,16 +449,19 @@ class EnergyOptimizer:
                         'vacancy_duration_minutes': int(vacant_count * 30) if is_occupied == 0 else None,
                         'rcwl': rcwl,
                         'pir': pir,
+                        'advice': 'Use devices correctly: place motion sensors where they can see the main activity area. Avoid obstructions and direct sunlight on PIR.',
+                        'mitigation': 'Reposition or align the motion sensors so both RCWL and PIR agree when someone is present. Test by walking in and out and checking readings.',
                     })
         
         # Recommendation 5: Extended vacancy with energy consumption
         if is_occupied == 0 and vacant_count >= 6:  # Vacant for at least 3 hours (assuming 30min intervals)
             if current_energy > threshold_low:
+                wasted_kwh = current_energy * 24 / 1000
                 recommendations.append({
                     'type': 'high_priority',
-                    'title': 'Extended vacancy detected',
-                    'message': f'Room has been vacant for extended period ({int(vacant_count * 0.5)} hours) but still consuming {current_energy:.2f}W. Consider automated shutoff.',
-                    'estimated_savings': current_energy * 24 / 1000,  # kWh per day
+                    'title': 'Room empty for hours but devices still on',
+                    'message': f'Room has been empty for about {int(vacant_count * 0.5)} hours yet still using {current_energy:.0f} W. That is roughly {wasted_kwh:.1f} kWh per day wasted.',
+                    'estimated_savings': wasted_kwh,
                     'severity': 'high',
                     'location': location,
                     'module': module,
@@ -457,14 +472,17 @@ class EnergyOptimizer:
                     'vacancy_duration_minutes': int(vacant_count * 30),
                     'rcwl': rcwl,
                     'pir': pir,
+                    'advice': 'Use timers or smart plugs to turn off AC and non-essential devices when the room is unused. Set a "last person leaves" routine if you have automation.',
+                    'energy_wasted_kwh_per_day': wasted_kwh,
+                    'mitigation': 'Turn off all devices in this room now. Consider installing automatic shutoff (timer or motion-based) so this does not repeat.',
                 })
         
         # Recommendation 6: Low energy prediction - good efficiency
         if latest.get('predicted_energy', 0) < threshold_low and current_energy < threshold_low:
             recommendations.append({
                 'type': 'info',
-                'title': 'Energy efficiency is good',
-                'message': f'Current energy consumption ({current_energy:.2f}W) is within optimal range. Keep monitoring for best practices.',
+                'title': 'Devices are being used efficiently',
+                'message': f'Current use ({current_energy:.0f} W) is in a good range. Your habits are helping save energy.',
                 'estimated_savings': 0,
                 'severity': 'low',
                 'location': location,
@@ -475,6 +493,8 @@ class EnergyOptimizer:
                 'is_occupied': bool(is_occupied),
                 'rcwl': rcwl,
                 'pir': pir,
+                'advice': 'Keep turning off devices when not in use and using moderate AC settings. Small habits add up to big savings.',
+                'mitigation': 'No change needed. Keep monitoring to spot any sudden increase in usage.',
             })
         
         return recommendations

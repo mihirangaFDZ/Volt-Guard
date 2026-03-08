@@ -10,17 +10,17 @@ from database import energy_col, analytics_col
 
 from app.services.energy_optimizer import EnergyOptimizer
 from app.services.dataset_generator import DatasetGenerator
-from utils.jwt_handler import get_current_user
+from utils.jwt_handler import get_current_user_optional
 
 router = APIRouter(
     prefix="/optimization",
     tags=["AI Optimization"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_user_optional)],
 )
 
 
 class RecommendationResponse(BaseModel):
-    """Response model for recommendations"""
+    """Response model for user-understandable recommendations"""
     type: str
     title: str
     message: str
@@ -35,6 +35,10 @@ class RecommendationResponse(BaseModel):
     vacancy_duration_minutes: Optional[int] = None
     rcwl: Optional[int] = None
     pir: Optional[int] = None
+    # User-understandable fields: how to use devices, waste, how to fix
+    advice: Optional[str] = None
+    energy_wasted_kwh_per_day: Optional[float] = None
+    mitigation: Optional[str] = None
 
 
 class OptimizationResponse(BaseModel):
