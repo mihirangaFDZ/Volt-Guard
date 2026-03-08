@@ -112,7 +112,8 @@ class _DashboardPageState extends State<DashboardPage> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => NotificationsPage(anomalies: _anomalies),
+                      builder: (context) =>
+                          NotificationsPage(anomalies: _anomalies),
                     ),
                   );
                 },
@@ -253,6 +254,204 @@ class _DashboardPageState extends State<DashboardPage> {
     return '${watts.toStringAsFixed(0)} W';
   }
 
+  String _convertUtcHourRangeToSriLanka(String value) {
+    if (value.trim().isEmpty || value == 'N/A') return value;
+
+    final regex = RegExp(
+      r'^\s*(\d{1,2})\s*(AM|PM)\s*-\s*(\d{1,2})\s*(AM|PM)\s*$',
+      caseSensitive: false,
+    );
+    final match = regex.firstMatch(value);
+    if (match == null) return value;
+
+    int toMinutes(String hourText, String amPmText) {
+      int hour = int.tryParse(hourText) ?? 0;
+      final amPm = amPmText.toUpperCase();
+      if (hour == 12) {
+        hour = 0;
+      }
+      if (amPm == 'PM') {
+        hour += 12;
+      }
+      return hour * 60;
+    }
+
+    String to12HourLabel(int totalMinutes) {
+      final normalized = ((totalMinutes % 1440) + 1440) % 1440;
+      final hour24 = normalized ~/ 60;
+      final minute = normalized % 60;
+      final isPm = hour24 >= 12;
+      final hour12Raw = hour24 % 12;
+      final hour12 = hour12Raw == 0 ? 12 : hour12Raw;
+      final amPm = isPm ? 'PM' : 'AM';
+
+      if (minute == 0) {
+        return '$hour12 $amPm';
+      }
+      return '$hour12:${minute.toString().padLeft(2, '0')} $amPm';
+    }
+
+    final startUtcMins = toMinutes(match.group(1)!, match.group(2)!);
+    final endUtcMins = toMinutes(match.group(3)!, match.group(4)!);
+
+    const sriLankaOffsetMinutes = 5 * 60 + 30;
+    final startLkMins = startUtcMins + sriLankaOffsetMinutes;
+    final endLkMins = endUtcMins + sriLankaOffsetMinutes;
+
+    return '${to12HourLabel(startLkMins)} - ${to12HourLabel(endLkMins)}';
+  }
+
+  double _calculateTariffCostLkr(double kwh, {double billingDays = 30}) {
+    if (kwh <= 0 || billingDays <= 0) return 0.0;
+
+    final factor = billingDays / 30.0;
+
+    // Domestic low users (<= 60 units/month, prorated by billing days)
+    final low30Limit = 30.0 * factor;
+    final low60Limit = 60.0 * factor;
+
+    if (kwh <= low60Limit) {
+      final units0to30 = min(kwh, low30Limit);
+      final units31to60 = max(kwh - low30Limit, 0.0);
+
+      final energyCost = (units0to30 * 4.50) + (units31to60 * 8.00);
+      final fixedCharge = (kwh <= low30Limit ? 80.0 : 210.0) * factor;
+      return energyCost + fixedCharge;
+    }
+
+    // Domestic users > 60 units/month (prorated blocks)
+    double remaining = kwh;
+    double energyCost = 0.0;
+
+    final highBlocks = <(double, double)>[
+      (60.0 * factor, 12.75),
+      (30.0 * factor, 18.50),
+      (30.0 * factor, 24.00),
+      (60.0 * factor, 41.00),
+    ];
+
+    for (final (blockSize, rate) in highBlocks) {
+      if (remaining <= 0) break;
+      final units = min(remaining, blockSize);
+      energyCost += units * rate;
+      remaining -= units;
+    }
+
+    if (remaining > 0) {
+      energyCost += remaining * 61.00;
+    }
+
+    final high60Limit = 60.0 * factor;
+    final high90Limit = 90.0 * factor;
+    final high180Limit = 180.0 * factor;
+    final fixedCharge = kwh <= high60Limit
+        ? 0.0 * factor
+        : kwh <= high90Limit
+            ? 400.0 * factor
+            : kwh <= high180Limit
+                ? (kwh <= 120.0 * factor ? 1000.0 * factor : 1500.0 * factor)
+                : 2100.0 * factor;
+
+    return energyCost + fixedCharge;
+  }
+
+  String _simpleTariffCalculation(double kwh, {double billingDays = 30}) {
+    if (kwh <= 0 || billingDays <= 0) {
+      return 'For 0.00 kWh\nEnergy: Rs. 0.00\nFixed: Rs. 0.00\nTotal Bill: Rs. 0.00';
+    }
+
+    final factor = billingDays / 30.0;
+    final low30Limit = 30.0 * factor;
+    final low60Limit = 60.0 * factor;
+
+    double energyCost = 0.0;
+    double fixedCharge = 0.0;
+    double fixedBase = 0.0;
+    final energyTerms = <String>[];
+
+    if (kwh <= low60Limit) {
+      final units0to30 = min(kwh, low30Limit);
+      final units31to60 = max(kwh - low30Limit, 0.0);
+
+      if (units0to30 > 0) {
+        energyTerms.add('${units0to30.toStringAsFixed(2)}×4.50');
+      }
+      if (units31to60 > 0) {
+        energyTerms.add('${units31to60.toStringAsFixed(2)}×8.00');
+      }
+
+      energyCost = (units0to30 * 4.50) + (units31to60 * 8.00);
+      fixedBase = kwh <= low30Limit ? 80.0 : 210.0;
+      fixedCharge = fixedBase * factor;
+    } else {
+      double remaining = kwh;
+      final b1 = min(remaining, 60.0 * factor);
+      energyCost += b1 * 12.75;
+      if (b1 > 0) {
+        energyTerms.add('${b1.toStringAsFixed(2)}×12.75');
+      }
+      remaining -= b1;
+
+      final b2 = min(max(remaining, 0.0), 30.0 * factor);
+      energyCost += b2 * 18.50;
+      if (b2 > 0) {
+        energyTerms.add('${b2.toStringAsFixed(2)}×18.50');
+      }
+      remaining -= b2;
+
+      final b3 = min(max(remaining, 0.0), 30.0 * factor);
+      energyCost += b3 * 24.00;
+      if (b3 > 0) {
+        energyTerms.add('${b3.toStringAsFixed(2)}×24.00');
+      }
+      remaining -= b3;
+
+      final b4 = min(max(remaining, 0.0), 60.0 * factor);
+      energyCost += b4 * 41.00;
+      if (b4 > 0) {
+        energyTerms.add('${b4.toStringAsFixed(2)}×41.00');
+      }
+      remaining -= b4;
+
+      if (remaining > 0) {
+        energyCost += remaining * 61.00;
+        energyTerms.add('${remaining.toStringAsFixed(2)}×61.00');
+      }
+
+      if (kwh <= 90.0 * factor) {
+        fixedBase = 400.0;
+      } else if (kwh <= 120.0 * factor) {
+        fixedBase = 1000.0;
+      } else if (kwh <= 180.0 * factor) {
+        fixedBase = 1500.0;
+      } else {
+        fixedBase = 2100.0;
+      }
+
+      fixedCharge = fixedBase * factor;
+    }
+
+    final total = energyCost + fixedCharge;
+    final energyExpr =
+        energyTerms.isNotEmpty ? energyTerms.join(' + ') : '0.00';
+
+    return 'For ${kwh.toStringAsFixed(2)} kWh\n'
+        'Energy: $energyExpr = Rs. ${energyCost.toStringAsFixed(2)}\n'
+        'Fixed: Rs. ${fixedBase.toStringAsFixed(0)} × (${billingDays.toStringAsFixed(0)}/30) = Rs. ${fixedCharge.toStringAsFixed(2)}\n'
+        'Total Bill: Rs. ${total.toStringAsFixed(2)}';
+  }
+
+  String _tariffTierLabel(double kwh, {double billingDays = 30}) {
+    final factor = billingDays > 0 ? (billingDays / 30.0) : 1.0;
+
+    if (kwh <= 30.0 * factor) return '0-30';
+    if (kwh <= 60.0 * factor) return '31-60';
+    if (kwh <= 90.0 * factor) return '61-90';
+    if (kwh <= 120.0 * factor) return '91-120';
+    if (kwh <= 180.0 * factor) return '121-180';
+    return '>180';
+  }
+
   IconData _deviceIcon(String? type) {
     switch (type?.toLowerCase()) {
       case 'ac':
@@ -318,10 +517,11 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildTodayEnergyCard(BuildContext context) {
     final totalKwh = (_todayEnergy['total_kwh'] as num?)?.toDouble() ?? 0.0;
-    final cost =
-        (_todayEnergy['estimated_cost_lkr'] as num?)?.toDouble() ?? 0.0;
-    final peakHour = _todayEnergy['peak_hour'] as String? ?? 'N/A';
+    final cost = _calculateTariffCostLkr(totalKwh, billingDays: 1);
+    final peakHourUtc = _todayEnergy['peak_hour'] as String? ?? 'N/A';
+    final peakHour = _convertUtcHourRangeToSriLanka(peakHourUtc);
     final avgPower = (_todayEnergy['avg_power_w'] as num?)?.toDouble() ?? 0.0;
+    final billFormula = _simpleTariffCalculation(totalKwh, billingDays: 1);
 
     return Card(
       elevation: 2,
@@ -348,7 +548,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${totalKwh.toStringAsFixed(1)} kWh',
+                      '${totalKwh.toStringAsFixed(2)} kWh',
                       style: const TextStyle(
                         fontSize: 32,
                         fontWeight: FontWeight.bold,
@@ -376,22 +576,55 @@ class _DashboardPageState extends State<DashboardPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _buildQuickStat(context, 'Estimated Cost',
-                    'Rs. ${cost.toStringAsFixed(2)}', Colors.green),
+                _buildQuickStat(
+                  context,
+                  'Estimated Cost',
+                  'Rs. ${cost.toStringAsFixed(2)}',
+                  Colors.green,
+                ),
                 Container(
                   height: 40,
                   width: 1,
                   color: Theme.of(context).colorScheme.outlineVariant,
                 ),
-                _buildQuickStat(context, 'Peak Hour', peakHour, Colors.orange),
+                _buildQuickStat(
+                  context,
+                  'Peak Hour',
+                  peakHour,
+                  Colors.orange,
+                  flex: 1,
+                  valueFontSize: 17,
+                  valueMaxLines: 2,
+                ),
                 Container(
                   height: 40,
                   width: 1,
                   color: Theme.of(context).colorScheme.outlineVariant,
                 ),
-                _buildQuickStat(context, 'Avg. Power', _formatPower(avgPower),
-                    Colors.purple),
+                _buildQuickStat(
+                  context,
+                  'Avg. Power',
+                  _formatPower(avgPower),
+                  Colors.purple,
+                ),
               ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                billFormula,
+                style: TextStyle(
+                  fontSize: 12,
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.75),
+                ),
+              ),
             ),
           ],
         ),
@@ -400,14 +633,25 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildQuickStat(
-      BuildContext context, String label, String value, Color color) {
+    BuildContext context,
+    String label,
+    String value,
+    Color color, {
+    int flex = 1,
+    double valueFontSize = 18,
+    int valueMaxLines = 1,
+  }) {
     return Expanded(
+      flex: flex,
       child: Column(
         children: [
           Text(
             value,
+            textAlign: TextAlign.center,
+            maxLines: valueMaxLines,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 18,
+              fontSize: valueFontSize,
               fontWeight: FontWeight.bold,
               color: color,
             ),
@@ -431,7 +675,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _buildTomorrowPredictionCard(BuildContext context) {
     final predictedKwh =
         (_prediction['total_predicted_kwh'] as num?)?.toDouble() ?? 0.0;
-    final cost = (_prediction['estimated_cost_lkr'] as num?)?.toDouble() ?? 0.0;
+    final cost = _calculateTariffCostLkr(predictedKwh, billingDays: 1);
     final changePercent =
         (_prediction['change_percent'] as num?)?.toDouble() ?? 0.0;
     final confidence =
@@ -1069,14 +1313,20 @@ class _DashboardPageState extends State<DashboardPage> {
     final baselineKwh =
         (_savingsData['baseline_kwh'] as num?)?.toDouble() ?? 0.0;
     final actualKwh = (_savingsData['actual_kwh'] as num?)?.toDouble() ?? 0.0;
-    final savedKwh = (_savingsData['saved_kwh'] as num?)?.toDouble() ?? 0.0;
-    final savedLkr = (_savingsData['saved_lkr'] as num?)?.toDouble() ?? 0.0;
+    final days = (_savingsData['days'] as num?)?.toDouble() ??
+        (_chartPeriod == 'week'
+            ? 7.0
+            : _chartPeriod == 'month'
+                ? 30.0
+                : 1.0);
+    final savedKwh = (_savingsData['saved_kwh'] as num?)?.toDouble() ??
+        max(baselineKwh - actualKwh, 0.0);
     final savingsPct =
         (_savingsData['savings_percent'] as num?)?.toDouble() ?? 0.0;
-    final baselineLkr =
-        (_savingsData['baseline_lkr'] as num?)?.toDouble() ?? 0.0;
-    final actualLkr = (_savingsData['actual_lkr'] as num?)?.toDouble() ?? 0.0;
-    final tariffTier = _savingsData['current_tariff_tier'] as String? ?? '';
+    final baselineLkr = _calculateTariffCostLkr(baselineKwh, billingDays: days);
+    final actualLkr = _calculateTariffCostLkr(actualKwh, billingDays: days);
+    final savedLkr = max(baselineLkr - actualLkr, 0.0);
+    final tariffTier = _tariffTierLabel(actualKwh, billingDays: days);
 
     final hasSavings = savedKwh > 0;
     final gaugeColor = hasSavings ? Colors.green : Colors.orange;
