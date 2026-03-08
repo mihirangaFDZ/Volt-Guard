@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-02-23T19:47:08.268089",
-  "hours_back": 48,
-  "num_records": 11050,
+  "created_at": "2026-03-08T20:32:11.975564",
+  "hours_back": 72,
+  "num_records": 22143,
   "feature_columns": [
     "current_ma",
     "current_a",
@@ -40,14 +40,14 @@
   ],
   "statistics": {
     "energy": {
-      "mean_current": 0.3094356048314404,
-      "std_current": 0.2937613078987767,
-      "mean_power": 1.0211374959437534
+      "mean_current": 0.2546569753605769,
+      "std_current": 0.019856414097461094,
+      "mean_power": 0.8403680186899039
     },
     "occupancy": {
-      "mean_temperature": 27.855740578439967,
-      "mean_humidity": 64.961393514461,
-      "occupancy_rate": 0.15600350569675722
+      "mean_temperature": 32.35102420856611,
+      "mean_humidity": 66.15176908752328,
+      "occupancy_rate": 1.0
     }
   }
 }

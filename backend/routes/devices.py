@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from database import devices_col, energy_col
+from database import devices_col, energy_col, anomaly_col
 from app.models.device_model import Device, RelayStateUpdate
 from utils.jwt_handler import get_current_user
 
@@ -145,6 +145,68 @@ def get_relay_state(device_id: str):
         "device_id": device_id,
         "relay_state": device.get("relay_state", "OFF"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Anomaly-based auto shutoff (only when model detects abnormal power)
+# ---------------------------------------------------------------------------
+
+# Minimum anomaly score to allow auto shutoff (conservative: only clear anomalies)
+ANOMALY_SHUTOFF_MIN_SCORE = 0.6
+# Only consider anomalies detected in the last N minutes
+ANOMALY_SHUTOFF_WINDOW_MINUTES = 10
+
+
+@router.post("/{device_id}/check-anomaly-shutoff")
+def check_anomaly_shutoff(device_id: str):
+    """
+    If the model has detected abnormal power consumption (High severity, score >= 0.6)
+    for this device in the last 10 minutes, turn the relay OFF to protect the circuit.
+    Returns whether auto-shutoff was performed. Does nothing if no anomaly or relay already OFF.
+    """
+    device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    current_relay = device.get("relay_state", "OFF")
+    if current_relay != "ON":
+        return {"auto_shutoff": False, "reason": "Device is already OFF"}
+
+    module_id = device.get("module_id") or ""
+    cutoff = datetime.utcnow() - timedelta(minutes=ANOMALY_SHUTOFF_WINDOW_MINUTES)
+    cutoff_iso = cutoff.isoformat()
+
+    # Anomalies may be stored with device_id or location (module_id)
+    query = {
+        "$or": [
+            {"device_id": device_id},
+            {"location": device_id},
+            {"location": module_id},
+        ],
+        "detected_at": {"$gte": cutoff_iso},
+        "severity": "High",
+    }
+    recent = list(
+        anomaly_col.find(query, {"anomaly_score": 1, "detected_at": 1}).sort(
+            "detected_at", -1
+        )
+    )
+
+    for doc in recent:
+        score = doc.get("anomaly_score") or 0
+        if score >= ANOMALY_SHUTOFF_MIN_SCORE:
+            devices_col.update_one(
+                {"device_id": device_id},
+                {"$set": {"relay_state": "OFF"}},
+            )
+            return {
+                "auto_shutoff": True,
+                "reason": "Abnormal power consumption detected by model",
+                "anomaly_score": round(score, 3),
+                "detected_at": doc.get("detected_at"),
+            }
+
+    return {"auto_shutoff": False, "reason": "No qualifying anomaly in window"}
 
 
 # ── ESP32 public router (no JWT auth) ──────────────────────────────────

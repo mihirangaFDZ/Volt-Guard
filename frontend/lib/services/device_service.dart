@@ -104,5 +104,18 @@ class DeviceService {
     final data = jsonDecode(resp.body) as Map<String, dynamic>;
     return data['relay_state'] as String? ?? 'OFF';
   }
+
+  /// Check if model detected abnormal power and trigger auto shutoff if needed.
+  /// Returns { auto_shutoff: bool, reason: string, ... }.
+  Future<Map<String, dynamic>> checkAnomalyShutoff(String deviceId) async {
+    final headers = await _authService.getAuthHeaders();
+    headers['Accept'] = 'application/json';
+    final uri = Uri.parse(
+      '${ApiConfig.baseUrl}${ApiConfig.devicesEndpoint}/$deviceId/check-anomaly-shutoff',
+    );
+    final resp = await http.post(uri, headers: headers).timeout(ApiConfig.requestTimeout);
+    _ensureOk(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
 }
 
