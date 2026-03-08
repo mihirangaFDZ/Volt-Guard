@@ -12,6 +12,7 @@ from database import (
 )
 from app.models.fault_model import Fault, FaultSummary
 from utils.jwt_handler import get_current_user
+from app.services.ownership import get_owner_user_id, device_access_query
 
 router = APIRouter(
     prefix="/faults",
@@ -36,9 +37,11 @@ def _default_summary() -> FaultSummary:
 def get_active_faults(
     severity: Optional[str] = Query(None, pattern="^(Critical|High|Medium|Low)$"),
     limit: int = Query(20, ge=1, le=100),
+    current_user=Depends(get_current_user),
 ):
     try:
-        query = {"status": "active"}
+        owner_user_id = get_owner_user_id(current_user)
+        query = {"status": "active", "owner_user_id": owner_user_id}
         if severity:
             query["severity"] = severity
         data = list(faults_col.find(query, {"_id": 0}).sort([("severity", -1), ("detected_at", -1)]).limit(limit))
@@ -51,8 +54,10 @@ def get_active_faults(
 def get_fault_history(
     device_id: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
+    current_user=Depends(get_current_user),
 ):
-    query = {}
+    owner_user_id = get_owner_user_id(current_user)
+    query = {"owner_user_id": owner_user_id}
     if device_id:
         query["device_id"] = device_id
     data = list(faults_col.find(query, {"_id": 0}).sort("detected_at", -1).limit(limit))
@@ -60,17 +65,25 @@ def get_fault_history(
 
 
 @router.get("/device-health")
-def get_device_health(limit: int = Query(20, ge=1, le=100)):
+def get_device_health(limit: int = Query(20, ge=1, le=100), current_user=Depends(get_current_user)):
     """
     Derives device health from recent energy + occupancy telemetry.
     """
     try:
-        devices = list(devices_col.find({}, {"_id": 0}).limit(limit))
+        owner_query = device_access_query(current_user)
+        owner_user_id = get_owner_user_id(current_user)
+        devices = list(devices_col.find(owner_query, {"_id": 0}).limit(limit))
         health = []
         now = datetime.utcnow()
         for d in devices:
-            recent_energy = energy_col.find_one({"device_id": d["device_id"]}, sort=[("timestamp", -1)])
-            recent_occupancy = analytics_col.find_one({"module": d.get("module", "")}, sort=[("received_at", -1)])
+            recent_energy = energy_col.find_one(
+                {"device_id": d["device_id"], "owner_user_id": owner_user_id},
+                sort=[("timestamp", -1)],
+            )
+            recent_occupancy = analytics_col.find_one(
+                {"module": d.get("module_id", ""), "owner_user_id": owner_user_id},
+                sort=[("received_at", -1)],
+            )
             score = 90
             notes = []
             if recent_energy and recent_energy.get("temperature", 0) > 32:
@@ -108,24 +121,27 @@ def get_model_stats():
 
 
 @router.post("/", response_model=Fault)
-def create_fault(fault: Fault):
+def create_fault(fault: Fault, current_user=Depends(get_current_user)):
+    owner_user_id = get_owner_user_id(current_user)
     payload = fault.dict()
     payload["detected_at"] = payload["detected_at"] or datetime.utcnow()
+    payload["owner_user_id"] = owner_user_id
     faults_col.insert_one(payload)
     payload.pop("_id", None)
     return payload
 
 
 @router.get("/{fault_id}", response_model=Fault)
-def get_fault(fault_id: str):
-    fault = faults_col.find_one({"fault_id": fault_id}, {"_id": 0})
+def get_fault(fault_id: str, current_user=Depends(get_current_user)):
+    owner_user_id = get_owner_user_id(current_user)
+    fault = faults_col.find_one({"fault_id": fault_id, "owner_user_id": owner_user_id}, {"_id": 0})
     if not fault:
         raise HTTPException(status_code=404, detail="Fault not found")
     return fault
 
 
 @router.get("/analytics/trends")
-def get_fault_trends(days: int = Query(7, ge=1, le=90)):
+def get_fault_trends(days: int = Query(7, ge=1, le=90), current_user=Depends(get_current_user)):
     """
     Get fault trends over time, grouped by day and severity.
     """
@@ -133,9 +149,10 @@ def get_fault_trends(days: int = Query(7, ge=1, le=90)):
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=days)
         
+        owner_user_id = get_owner_user_id(current_user)
         # Get all faults in the date range
         all_faults = list(faults_col.find(
-            {"detected_at": {"$gte": start_date, "$lte": end_date}},
+            {"detected_at": {"$gte": start_date, "$lte": end_date}, "owner_user_id": owner_user_id},
             {"_id": 0, "detected_at": 1, "severity": 1}
         ))
         
@@ -172,29 +189,29 @@ def get_fault_trends(days: int = Query(7, ge=1, le=90)):
 
 
 @router.get("/analytics/predictive-warnings")
-def get_predictive_warnings():
+def get_predictive_warnings(current_user=Depends(get_current_user)):
     """
     Get predictive fault warnings based on prediction models and energy patterns.
     """
     try:
         warnings = []
-        now = datetime.utcnow()
+        owner_user_id = get_owner_user_id(current_user)
         
         # Get devices with recent predictions
-        recent_predictions = list(prediction_col.find({}, {"_id": 0}).limit(50))
+        recent_predictions = list(prediction_col.find({"owner_user_id": owner_user_id}, {"_id": 0}).limit(50))
         
         for pred in recent_predictions:
             device_id = pred.get("device_id")
             if not device_id:
                 continue
                 
-            device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
+            device = devices_col.find_one({"device_id": device_id, "owner_user_id": owner_user_id}, {"_id": 0})
             if not device:
                 continue
             
             # Get recent energy readings
             recent_energy = list(energy_col.find(
-                {"device_id": device_id},
+                {"device_id": device_id, "owner_user_id": owner_user_id},
                 {"_id": 0}
             ).sort("timestamp", -1).limit(10))
             
@@ -230,7 +247,7 @@ def get_predictive_warnings():
                 risk_factors.append("Power consumption exceeding rated capacity")
             
             # Check for existing active faults
-            active_faults = faults_col.count_documents({"device_id": device_id, "status": "active"})
+            active_faults = faults_col.count_documents({"device_id": device_id, "status": "active", "owner_user_id": owner_user_id})
             if active_faults > 0:
                 risk_score += 25
                 risk_factors.append(f"{active_faults} active fault(s) present")
@@ -257,13 +274,18 @@ def get_predictive_warnings():
 
 
 @router.get("/analytics/energy-correlation")
-def get_energy_fault_correlation(device_id: Optional[str] = None, hours: int = Query(24, ge=1, le=168)):
+def get_energy_fault_correlation(
+    device_id: Optional[str] = None,
+    hours: int = Query(24, ge=1, le=168),
+    current_user=Depends(get_current_user),
+):
     try:
         end_time = datetime.utcnow()
         start_time = end_time - timedelta(hours=hours)
+        owner_user_id = get_owner_user_id(current_user)
         
         # Get faults in time range
-        fault_query = {"detected_at": {"$gte": start_time, "$lte": end_time}}
+        fault_query = {"detected_at": {"$gte": start_time, "$lte": end_time}, "owner_user_id": owner_user_id}
         if device_id:
             fault_query["device_id"] = device_id
         
@@ -290,7 +312,8 @@ def get_energy_fault_correlation(device_id: Optional[str] = None, hours: int = Q
             energy_readings = list(energy_col.find(
                 {
                     "device_id": f_device_id,
-                    "timestamp": {"$gte": energy_window_start, "$lte": energy_window_end}
+                    "timestamp": {"$gte": energy_window_start, "$lte": energy_window_end},
+                    "owner_user_id": owner_user_id,
                 },
                 {"_id": 0}
             ).sort("timestamp", 1))
@@ -333,14 +356,15 @@ def get_energy_fault_correlation(device_id: Optional[str] = None, hours: int = Q
 
 
 @router.get("/analytics/patterns")
-def get_fault_patterns():
+def get_fault_patterns(current_user=Depends(get_current_user)):
     """
     Identify fault patterns by grouping similar faults.
     """
     try:
+        owner_user_id = get_owner_user_id(current_user)
         # Get all active and recent faults
         recent_faults = list(faults_col.find(
-            {"status": {"$in": ["active", "acknowledged"]}},
+            {"status": {"$in": ["active", "acknowledged"]}, "owner_user_id": owner_user_id},
             {"_id": 0}
         ).limit(100))
     
@@ -349,7 +373,7 @@ def get_fault_patterns():
         
         for fault in recent_faults:
             device_id = fault.get("device_id")
-            device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
+            device = devices_col.find_one({"device_id": device_id, "owner_user_id": owner_user_id}, {"_id": 0})
             device_type = device.get("device_type", "Unknown") if device else "Unknown"
             
             issue = fault.get("issue", "Unknown Issue")
@@ -407,17 +431,19 @@ def get_fault_patterns():
 
 
 @router.get("/analytics/zone-heatmap")
-def get_zone_heatmap():
+def get_zone_heatmap(current_user=Depends(get_current_user)):
     """
     Get fault distribution by location/zone for heatmap visualization.
     """
     try:
+        owner_query = device_access_query(current_user)
+        owner_user_id = get_owner_user_id(current_user)
         # Get all devices with their locations
-        devices = list(devices_col.find({}, {"_id": 0}))
+        devices = list(devices_col.find(owner_query, {"_id": 0}))
         device_locations = {d["device_id"]: d.get("location", "Unknown") for d in devices}
         
         # Get active faults
-        active_faults = list(faults_col.find({"status": "active"}, {"_id": 0}))
+        active_faults = list(faults_col.find({"status": "active", "owner_user_id": owner_user_id}, {"_id": 0}))
     
         # Group by location
         location_stats = {}

@@ -17,6 +17,7 @@ from app.services.autoencoder_service import AutoencoderAnomalyDetector
 from app.services.data_extraction import extract_energy_readings, extract_occupancy_telemetry
 from app.services.data_cleaning import DataCleaner
 from app.services.feature_engineering import FeatureEngineer
+from app.services.ownership import get_owner_user_id
 
 router = APIRouter(
     prefix="/anomalies",
@@ -45,11 +46,11 @@ def get_ae_service():
     return _ae_service if _ae_service.is_trained else None
 
 @router.post("/")
-def add_anomaly(anomaly: Anomaly):
-    """Manually add an anomaly to database"""
+def add_anomaly(anomaly: Anomaly, current_user=Depends(get_current_user)):
+    owner_user_id = get_owner_user_id(current_user)
     doc = anomaly.dict()
-    doc["created_at"] = datetime.utcnow()
-    anomaly_col.insert_one(doc)
+    doc["owner_user_id"] = owner_user_id
+    anomalies_col.insert_one(doc)
     return {"message": "Anomaly recorded"}
 
 @router.get("/active")

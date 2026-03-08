@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pymongo.errors import DuplicateKeyError
 from database import user_col
 from app.models.user_model import UpdateUserReq, User
 from utils.security import hash_password
@@ -18,21 +19,27 @@ def _sanitize_user(doc: dict | None):
 def add_user(data: User):
     existing_user = user_col.find_one({"email": data.email})
     if existing_user:
-        return {"message": "Email already registered",
-                "success": False,
-                "statusCode": 400
-                }
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    existing_user_id = user_col.find_one({"user_id": data.user_id})
+    if existing_user_id:
+        raise HTTPException(status_code=409, detail="User ID already registered")
 
 
     user_data = data.dict()
     user_data["password"] = hash_password(user_data["password"])
 
-    user_col.insert_one(user_data)
+    try:
+        user_col.insert_one(user_data)
+    except DuplicateKeyError as exc:
+        raise HTTPException(status_code=409, detail="User already exists") from exc
 
     return {"message": "User created successfully"}
 
 @router.get("/")
-def get_users():
+def get_users(current_user=Depends(get_current_user)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
     data = list(user_col.find({}, {"_id": 0}).limit(10))
     return list(data)
 

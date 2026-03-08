@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends
 from database import analytics_col
 from utils.jwt_handler import get_current_user
+from app.services.ownership import telemetry_access_query
 from app.models.analytics_model import (
     Recommendation,
     RecommendationSeverity,
@@ -20,18 +21,20 @@ SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
 
 
 @router.get("/filters")
-def get_available_filters():
+def get_available_filters(current_user=Depends(get_current_user)):
     """
     Get available locations and modules from occupancy_telemetry table.
     Returns distinct values for filtering.
     """
     # Get distinct locations
-    locations = analytics_col.distinct("location")
+    match = telemetry_access_query(current_user)
+
+    locations = analytics_col.distinct("location", match)
     locations = [loc for loc in locations if loc]  # Filter out None/empty values
     locations.sort()
     
     # Get distinct modules
-    modules = analytics_col.distinct("module")
+    modules = analytics_col.distinct("module", match)
     modules = [mod for mod in modules if mod]  # Filter out None/empty values
     modules.sort()
     
@@ -42,12 +45,17 @@ def get_available_filters():
 
 
 @router.get("/occupancy-stats")
-def get_occupancy_stats(limit: int = 50, module: Optional[str] = None, location: Optional[str] = None):
+def get_occupancy_stats(
+    limit: int = 50,
+    module: Optional[str] = None,
+    location: Optional[str] = None,
+    current_user=Depends(get_current_user),
+):
     """
     Get occupancy statistics from occupancy_telemetry table.
     Returns statistics about occupied vs vacant periods.
     """
-    query = {}
+    query = telemetry_access_query(current_user)
     if module:
         query["module"] = module
     if location:
@@ -96,8 +104,13 @@ def get_occupancy_stats(limit: int = 50, module: Optional[str] = None, location:
 
 
 @router.get("/latest")
-def get_latest_readings(limit: int = 50, module: Optional[str] = None, location: Optional[str] = None):
-    query = {}
+def get_latest_readings(
+    limit: int = 50,
+    module: Optional[str] = None,
+    location: Optional[str] = None,
+    current_user=Depends(get_current_user),
+):
+    query = telemetry_access_query(current_user)
     if module:
         query["module"] = module
     if location:
@@ -259,8 +272,13 @@ def _derive_recommendations(docs: List[dict]) -> List[Recommendation]:
 
 
 @router.get("/recommendations", response_model=RecommendationsResponse)
-def get_recommendations(limit: int = 50, module: Optional[str] = None, location: Optional[str] = None):
-    query = {}
+def get_recommendations(
+    limit: int = 50,
+    module: Optional[str] = None,
+    location: Optional[str] = None,
+    current_user=Depends(get_current_user),
+):
+    query = telemetry_access_query(current_user)
     if module:
         query["module"] = module
     if location:

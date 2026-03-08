@@ -14,6 +14,7 @@ sys.path.insert(0, str(backend_dir))
 
 from app.services.lstm_service import LSTMPredictor
 import threading
+from app.services.ownership import get_owner_user_id
 
 router = APIRouter(
     prefix="/prediction",
@@ -36,10 +37,11 @@ def get_lstm_service():
         return _lstm_service if _lstm_service.is_trained else None
 
 @router.post("/")
-def save_prediction(prediction: Prediction):
-    """Save a prediction to database"""
+def save_prediction(prediction: Prediction, current_user=Depends(get_current_user)):
+    owner_user_id = get_owner_user_id(current_user)
     doc = prediction.dict()
     doc["created_at"] = datetime.utcnow()
+    doc["owner_user_id"] = owner_user_id
     prediction_col.insert_one(doc)
     return {"message": "Prediction saved"}
 
@@ -758,3 +760,6 @@ def device_comparison(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Device comparison failed: {str(e)}")
+def get_daily_predictions(current_user=Depends(get_current_user)):
+    owner_user_id = get_owner_user_id(current_user)
+    return list(prediction_col.find({"prediction_type": "daily", "owner_user_id": owner_user_id}, {"_id": 0}))

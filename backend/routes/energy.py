@@ -10,6 +10,7 @@ from database import energy_col, anomaly_col, devices_col
 from utils.jwt_handler import get_current_user
 
 logger = logging.getLogger(__name__)
+from app.services.ownership import get_owner_user_id, telemetry_access_query
 
 router = APIRouter(
     prefix="/energy",
@@ -226,12 +227,12 @@ def _realtime_anomaly_check(reading_dict: dict):
 # ------------------------------------------------------------------
 
 @router.post("/")
-def add_energy(data: EnergyReading, background_tasks: BackgroundTasks):
-    """Store incoming current/energy telemetry and run real-time anomaly check."""
+def add_energy(data: EnergyReading, current_user=Depends(get_current_user)):
+    """Store incoming current/energy telemetry."""
+    owner_user_id = get_owner_user_id(current_user)
     doc = data.dict(exclude_none=True)
+    doc["owner_user_id"] = owner_user_id
     energy_col.insert_one(doc)
-    # Trigger anomaly detection in the background so the response is instant
-    background_tasks.add_task(_realtime_anomaly_check, doc)
     return {"message": "Energy data stored"}
 
 
@@ -315,9 +316,10 @@ def get_latest_energy(
     limit: int = Query(50, ge=1, le=500),
     module: Optional[str] = None,
     location: Optional[str] = None,
+    current_user=Depends(get_current_user),
 ):
     """Return the most recent energy/current readings, newest first."""
-    query = {}
+    query = telemetry_access_query(current_user)
     if module:
         query["module"] = module
     if location:
@@ -333,9 +335,9 @@ def get_latest_energy(
 
 
 @router.get("/by-location")
-def get_latest_energy_by_location(module: Optional[str] = None):
+def get_latest_energy_by_location(module: Optional[str] = None, current_user=Depends(get_current_user)):
     """Return the latest reading per location (one row per location)."""
-    match = {}
+    match = telemetry_access_query(current_user)
     if module:
         match["module"] = module
 
@@ -360,9 +362,10 @@ def get_energy_usage(
     limit: int = Query(2000, ge=10, le=20000),
     module: Optional[str] = None,
     location: Optional[str] = None,
+    current_user=Depends(get_current_user),
 ):
     """Return approximate cumulative energy (kWh) per location over the fetched readings."""
-    query = {}
+    query = telemetry_access_query(current_user)
     if module:
         query["module"] = module
     if location:

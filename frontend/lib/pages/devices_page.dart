@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../services/device_service.dart';
 import '../services/fault_detection_service.dart';
@@ -40,6 +41,10 @@ class _DevicesPageState extends State<DevicesPage> {
   // Relay control state
   final Map<String, bool> _relayStates = {};
   final Map<String, bool> _relayLoading = {};
+  final stt.SpeechToText _speechToText = stt.SpeechToText();
+  bool _speechEnabled = false;
+  String? _listeningDeviceId;
+  final Map<String, bool> _voiceCommandHandled = {};
 
   // Summary statistics
   int _totalDevices = 0;
@@ -80,6 +85,64 @@ class _DevicesPageState extends State<DevicesPage> {
     super.initState();
     _loadDevices();
     _loadEnergyVampires();
+  }
+
+  @override
+  void dispose() {
+    _speechToText.cancel();
+    super.dispose();
+  }
+
+  Future<bool> _ensureSpeechReady() async {
+    if (_speechEnabled) return true;
+
+    _speechEnabled = await _speechToText.initialize(
+      onStatus: (status) {
+        if (!mounted) return;
+        if (status == 'notListening' && _listeningDeviceId != null) {
+          final deviceId = _listeningDeviceId!;
+          final handled = _voiceCommandHandled[deviceId] ?? false;
+          setState(() {
+            _listeningDeviceId = null;
+          });
+          if (!handled) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('No command detected. Say on or off.'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      },
+      onError: (error) {
+        if (!mounted) return;
+        setState(() {
+          _listeningDeviceId = null;
+        });
+      },
+    );
+
+    return _speechEnabled;
+  }
+
+  String? _extractVoiceCommand(String transcript) {
+    final normalized = transcript
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z\s]'), ' ')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ');
+
+    if (normalized.isEmpty) return null;
+
+    final words = normalized.split(' ');
+    final hasOn = words.contains('on');
+    final hasOff = words.contains('off');
+
+    if (hasOn == hasOff) return null;
+    if (hasOn) return 'on';
+    if (hasOff) return 'off';
+    return null;
   }
 
   Future<void> _loadDevices() async {
@@ -490,9 +553,11 @@ class _DevicesPageState extends State<DevicesPage> {
     });
   }
 
-  Future<void> _toggleRelay(String deviceId) async {
+  Future<void> _setRelayState(String deviceId, bool newState) async {
     final currentState = _relayStates[deviceId] ?? false;
-    final newState = !currentState;
+    if (currentState == newState) {
+      return;
+    }
 
     // Optimistic update
     setState(() {
@@ -522,9 +587,76 @@ class _DevicesPageState extends State<DevicesPage> {
     }
   }
 
+  Future<void> _toggleRelay(String deviceId) async {
+    final currentState = _relayStates[deviceId] ?? false;
+    await _setRelayState(deviceId, !currentState);
+  }
+
+  Future<void> _startVoiceCommand(String deviceId) async {
+    if (_relayLoading[deviceId] == true) return;
+
+    final ready = await _ensureSpeechReady();
+    if (!ready) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Voice control unavailable on this device.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (_speechToText.isListening) {
+      await _speechToText.stop();
+      if (!mounted) return;
+      setState(() {
+        _listeningDeviceId = null;
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _listeningDeviceId = deviceId;
+    });
+    _voiceCommandHandled[deviceId] = false;
+
+    await _speechToText.listen(
+      partialResults: false,
+      cancelOnError: true,
+      listenFor: const Duration(seconds: 4),
+      pauseFor: const Duration(seconds: 2),
+      onResult: (result) async {
+        if (!result.finalResult) return;
+
+        _voiceCommandHandled[deviceId] = true;
+        final command = _extractVoiceCommand(result.recognizedWords);
+        await _speechToText.stop();
+        if (!mounted) return;
+        setState(() {
+          _listeningDeviceId = null;
+        });
+
+        if (command == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Say only: on or off'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        await _setRelayState(deviceId, command == 'on');
+      },
+    );
+  }
+
   Widget _buildRelayControl(String deviceId) {
     final isOn = _relayStates[deviceId] ?? false;
     final isLoading = _relayLoading[deviceId] ?? false;
+    final isListening = _listeningDeviceId == deviceId;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -570,6 +702,17 @@ class _DevicesPageState extends State<DevicesPage> {
             ),
           ),
           const SizedBox(width: 8),
+          IconButton(
+            tooltip: isListening ? 'Stop voice command' : 'Voice command',
+            icon: Icon(
+              isListening ? Icons.mic : Icons.mic_none,
+              color: isListening
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+            ),
+            onPressed: isLoading ? null : () => _startVoiceCommand(deviceId),
+          ),
+          const SizedBox(width: 4),
           Switch(
             value: isOn,
             onChanged: isLoading ? null : (_) => _toggleRelay(deviceId),

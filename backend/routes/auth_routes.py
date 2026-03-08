@@ -8,13 +8,14 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/login")
 def login(data: loginReq):
-    user = db.users.find_one({"email": data.email})
+    query = {"user_id": data.user_id} if data.user_id else {"email": data.email}
+    user = db.users.find_one(query)
 
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid user ID/email or password")
 
     if not verify_password(data.password, user["password"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid user ID/email or password")
 
     token = create_access_token({
         "user_id": user["user_id"],

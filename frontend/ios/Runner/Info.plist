@@ -45,6 +45,10 @@
 		<true/>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
 		<true/>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Voice commands are used to turn devices on or off.</string>
+		<key>NSSpeechRecognitionUsageDescription</key>
+		<string>Speech recognition is used to detect on and off commands.</string>
 		<key>UIStatusBarHidden</key>
 		<false/>
 	</dict>
