@@ -29,7 +29,9 @@ class EnergyReading {
 
   factory EnergyReading.fromJson(Map<String, dynamic> json) {
     DateTime parsedTimestamp = DateTime.now().toUtc();
-    final String? tsString = json['received_at'] as String?;
+    // API may send received_at in Sri Lanka time (e.g. +05:30); parse and normalize to UTC
+    final String? tsString =
+        json['received_at'] as String? ?? json['receivedAt'] as String?;
     if (tsString != null) {
       final DateTime? parsed = DateTime.tryParse(tsString);
       if (parsed != null) {

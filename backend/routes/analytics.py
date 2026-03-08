@@ -222,6 +222,17 @@ def _to_datetime(value):
     return dt.astimezone(SRI_LANKA_TZ)
 
 
+def _convert_doc_ts_to_srilanka(doc: dict):
+    """Convert timestamp fields in a document to Sri Lankan timezone (UTC+5:30) as ISO strings."""
+    for key in ("received_at", "receivedAt", "timestamp", "created_at"):
+        val = doc.get(key)
+        if val is None:
+            continue
+        converted = _to_datetime(val)
+        if converted is not None:
+            doc[key] = converted.isoformat()
+
+
 def _is_sensor_turned_off(reading_time: datetime) -> bool:
     """
     Check if sensor is turned off based on reading timestamp.
@@ -592,6 +603,8 @@ def get_current_energy_stats(
 
         # kWh = (current * voltage * time_hours) / 1000
         estimated_kwh += (avg_current * 230.0 * (dt_seconds / 3600.0)) / 1000.0
+
+    _convert_doc_ts_to_srilanka(latest)
 
     return {
         "total_readings": len(docs),

@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, HTTPException
@@ -10,6 +10,30 @@ from database import energy_col, anomaly_col, devices_col
 from utils.jwt_handler import get_current_user
 
 logger = logging.getLogger(__name__)
+
+# Sri Lankan timezone (UTC+5:30)
+SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def _convert_ts_to_srilanka(doc: dict):
+    """Convert timestamp fields to Sri Lankan timezone (UTC+5:30) as ISO strings."""
+    for key in ("received_at", "receivedAt", "timestamp", "created_at"):
+        val = doc.get(key)
+        if val is None:
+            continue
+        if isinstance(val, datetime):
+            dt = val
+        elif isinstance(val, str):
+            try:
+                dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            except Exception:
+                continue
+        else:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        doc[key] = dt.astimezone(SRI_LANKA_TZ).isoformat()
+
 
 router = APIRouter(
     prefix="/energy",
@@ -329,7 +353,10 @@ def get_latest_energy(
         .sort(_timestamp_sort_fields())
         .limit(limit)
     )
-    return list(cursor)
+    docs = list(cursor)
+    for doc in docs:
+        _convert_ts_to_srilanka(doc)
+    return docs
 
 
 @router.get("/by-location")
@@ -352,7 +379,10 @@ def get_latest_energy_by_location(module: Optional[str] = None):
         ]
     )
 
-    return list(energy_col.aggregate(pipeline))
+    docs = list(energy_col.aggregate(pipeline))
+    for doc in docs:
+        _convert_ts_to_srilanka(doc)
+    return docs
 
 
 @router.get("/usage")
