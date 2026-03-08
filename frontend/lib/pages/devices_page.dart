@@ -7,6 +7,7 @@ import '../services/behavioral_profile_service.dart';
 import '../services/prediction_service.dart';
 import '../services/anomaly_alert_service.dart';
 import '../services/ml_training_manager.dart';
+import '../services/model_evaluation_service.dart';
 import '../models/energy_reading.dart';
 
 /// Devices page showing connected IoT devices with 24h insights and fault detection
@@ -62,8 +63,7 @@ class _DevicesPageState extends State<DevicesPage> {
   Map<String, dynamic>? _deviceForecast;
   bool _forecastLoading = false;
   String? _forecastError;
-  bool _scenarioReducedUsage = false;
-
+  String? _forecastWarning;
   // Device comparison state
   Map<String, dynamic>? _deviceComparison;
   bool _comparisonLoading = false;
@@ -71,6 +71,7 @@ class _DevicesPageState extends State<DevicesPage> {
 
   // Anomaly detection state
   final AnomalyAlertService _anomalyService = AnomalyAlertService();
+  final ModelEvaluationService _evalService = ModelEvaluationService();
   Map<String, Map<String, dynamic>> _deviceAnomalies = {};
   bool _anomalyLoading = false;
   String? _anomalyError;
@@ -78,8 +79,7 @@ class _DevicesPageState extends State<DevicesPage> {
   @override
   void initState() {
     super.initState();
-    _loadDevices();
-    _loadEnergyVampires();
+    _loadDevices(); // Energy vampires load in background after list is shown
   }
 
   Future<void> _loadDevices() async {
@@ -96,6 +96,7 @@ class _DevicesPageState extends State<DevicesPage> {
       setState(() {
         _devices = devices;
         _totalDevices = devices.length;
+        _loading = false; // Show list immediately
         // Initialize time ranges to 24h and relay states
         for (final device in devices) {
           final deviceId = device['device_id'] as String? ?? '';
@@ -105,31 +106,34 @@ class _DevicesPageState extends State<DevicesPage> {
         }
       });
 
-      // Load summary statistics and anomaly detection
-      await Future.wait([
-        _loadSummaryStatistics(),
-        _loadAnomalyDetection(),
-      ]);
-
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _loadingSummary = false;
+      // Load summary (faults only) and anomaly in background — don't block list
+      _loadSummaryStatistics().then((_) {
+        if (mounted) setState(() => _loadingSummary = false);
       });
+      _loadAnomalyDetection();
 
-      // Auto-select first device with module_id for forecast
+      // Hit energy-readings for every device so active devices count is correct
+      _loadLastReadingsForActiveCount();
+
+      // Forecast, comparison, and energy vampires in background
       final devicesWithModule = _devices
           .where((d) =>
               d['module_id'] != null && (d['module_id'] as String).isNotEmpty)
           .toList();
       if (devicesWithModule.isNotEmpty) {
-        final firstId = devicesWithModule.first['device_id'] as String? ?? '';
-        if (firstId.isNotEmpty) {
-          setState(() => _forecastSelectedDeviceId = firstId);
-          _loadDeviceForecast(firstId);
+        final currentSelected = _forecastSelectedDeviceId;
+        final validSelected = currentSelected != null &&
+            devicesWithModule.any((d) => (d['device_id'] as String?) == currentSelected);
+        final idToLoad = validSelected
+            ? currentSelected!
+            : devicesWithModule.first['device_id'] as String? ?? '';
+        if (idToLoad.isNotEmpty) {
+          setState(() => _forecastSelectedDeviceId = idToLoad);
+          _loadDeviceForecast(idToLoad);
         }
         _loadDeviceComparison();
       }
+      _loadEnergyVampires();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -144,13 +148,16 @@ class _DevicesPageState extends State<DevicesPage> {
     setState(() {
       _forecastLoading = true;
       _forecastError = null;
+      _forecastWarning = null;
       _deviceForecast = null;
     });
     try {
       final forecast = await _predictionService.fetchDeviceForecast(deviceId);
       if (!mounted) return;
+      final warning = forecast['warning'] as String?;
       setState(() {
         _deviceForecast = forecast;
+        _forecastWarning = warning;
         _forecastLoading = false;
       });
     } catch (e) {
@@ -227,8 +234,12 @@ class _DevicesPageState extends State<DevicesPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      final String message = e.toString().contains('TimeoutException') ||
+              e.toString().contains('timed out')
+          ? 'Request timed out. Tap refresh to try again.'
+          : 'Unable to load energy vampires: $e';
       setState(() {
-        _vampiresError = 'Unable to load energy vampires: $e';
+        _vampiresError = message;
         _vampiresLoading = false;
       });
     }
@@ -305,46 +316,14 @@ class _DevicesPageState extends State<DevicesPage> {
 
   Future<void> _loadSummaryStatistics() async {
     try {
-      // Fetch active faults
+      // Single API call: fetch active faults only (no per-device energy calls on load)
       final activeFaults = await _faultService.fetchActive(limit: 100);
-
-      // Check active devices by fetching latest readings for each device
-      int activeCount = 0;
-      final now = DateTime.now();
-
-      for (final device in _devices) {
-        final deviceId = device['device_id'] as String? ?? '';
-        try {
-          // Fetch just the latest reading (limit=1) to check if device is active
-          final data = await _deviceService.fetchDeviceEnergyReadings(
-            deviceId,
-            limit: 1,
-            hours: 1, // Check last hour
-          );
-          final readings = data['readings'] as List<EnergyReading>;
-          if (readings.isNotEmpty) {
-            final lastReading = readings.first;
-            final timeDiff = now.difference(lastReading.receivedAt);
-            _deviceLastReadings[deviceId] = lastReading.receivedAt;
-
-            // Active if last reading is within the last hour (matches fetch window)
-            if (timeDiff.inMinutes < 60) {
-              activeCount++;
-            }
-          }
-        } catch (e) {
-          // If error fetching, consider device inactive
-          _deviceLastReadings[deviceId] = null;
-        }
-      }
-
       if (!mounted) return;
       setState(() {
-        _activeDevices = activeCount;
         _totalFaults = activeFaults.length;
+        // Active count stays 0 until user expands devices (_recalculateActiveDevices)
       });
     } catch (e) {
-      // Silently fail - summary is not critical
       if (mounted) {
         setState(() {
           _activeDevices = 0;
@@ -384,6 +363,20 @@ class _DevicesPageState extends State<DevicesPage> {
     }
   }
 
+  /// Format kWh for display; clamp to reasonable range to avoid absurd values.
+  String _formatReasonableKwh(double value, {double maxKwh = 9999}) {
+    if (value < 0) return '0 kWh';
+    if (value > maxKwh) return '${maxKwh.toInt()}+ kWh';
+    return '${value.toStringAsFixed(2)} kWh';
+  }
+
+  /// Format cost in LKR for display; clamp to reasonable range.
+  String _formatReasonableCost(double value, {double maxLkr = 999999}) {
+    if (value < 0) return '0';
+    if (value > maxLkr) return '${maxLkr.toInt()}+';
+    return value.toStringAsFixed(0);
+  }
+
   String _getTimeRangeLabel(TimeRange range) {
     switch (range) {
       case TimeRange.hours6:
@@ -400,6 +393,25 @@ class _DevicesPageState extends State<DevicesPage> {
       _loadDeviceReadings(deviceId),
       _loadDeviceFaults(deviceId),
     ]);
+    if (!mounted) return;
+    // If model detected abnormal power, backend may have turned relay OFF
+    try {
+      final result = await _deviceService.checkAnomalyShutoff(deviceId);
+      if (result['auto_shutoff'] == true && mounted) {
+        setState(() => _relayStates[deviceId] = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result['reason'] as String? ??
+                  'Device turned off due to abnormal power consumption.',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (_) {
+      // Non-critical: ignore if endpoint fails
+    }
   }
 
   Future<void> _loadDeviceReadings(String deviceId) async {
@@ -475,13 +487,60 @@ class _DevicesPageState extends State<DevicesPage> {
     _loadDeviceReadings(deviceId);
   }
 
+  /// Fetches the latest energy reading for each device (limit=1) so that
+  /// _deviceLastReadings is populated and active devices count is correct on page load.
+  Future<void> _loadLastReadingsForActiveCount() async {
+    final deviceIds = _devices
+        .map((d) => d['device_id'] as String?)
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toList();
+    if (deviceIds.isEmpty) return;
+
+    final results = await Future.wait(
+      deviceIds.map((deviceId) async {
+        try {
+          return _deviceService.fetchDeviceEnergyReadings(
+            deviceId,
+            limit: 1,
+            hours: 24,
+          );
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      for (var i = 0; i < deviceIds.length; i++) {
+        final data = results[i];
+        if (data == null) continue;
+        final readings = data['readings'] as List<EnergyReading>? ?? [];
+        if (readings.isNotEmpty) {
+          _deviceLastReadings[deviceIds[i]] = readings.first.receivedAt;
+        }
+      }
+      final now = DateTime.now();
+      int activeCount = 0;
+      for (final device in _devices) {
+        final id = device['device_id'] as String? ?? '';
+        final lastReading = _deviceLastReadings[id];
+        if (lastReading != null && now.difference(lastReading).inSeconds <= 30) {
+          activeCount++;
+        }
+      }
+      _activeDevices = activeCount;
+    });
+  }
+
   void _recalculateActiveDevices() {
     final now = DateTime.now();
     int activeCount = 0;
     for (final device in _devices) {
       final deviceId = device['device_id'] as String? ?? '';
       final lastReading = _deviceLastReadings[deviceId];
-      if (lastReading != null && now.difference(lastReading).inMinutes < 60) {
+      if (lastReading != null && now.difference(lastReading).inSeconds <= 30) {
         activeCount++;
       }
     }
@@ -842,6 +901,38 @@ class _DevicesPageState extends State<DevicesPage> {
             _buildForecastDeviceDropdown(),
             const SizedBox(height: 16),
 
+            // Warning (insufficient or limited data)
+            if (_forecastWarning != null && !_forecastLoading)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.tertiaryContainer.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.5),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline,
+                        color: Theme.of(context).colorScheme.tertiary,
+                        size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _forecastWarning!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onTertiaryContainer,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             // Error state
             if (_forecastError != null && !_forecastLoading)
               Container(
@@ -886,7 +977,7 @@ class _DevicesPageState extends State<DevicesPage> {
                       CircularProgressIndicator(),
                       SizedBox(height: 12),
                       Text(
-                        'Running LSTM forecast...',
+                        'Generating forecast...',
                         style: TextStyle(color: Colors.grey, fontSize: 13),
                       ),
                     ],
@@ -894,16 +985,32 @@ class _DevicesPageState extends State<DevicesPage> {
                 ),
               ),
 
-            // Content when loaded
-            if (_deviceForecast != null) ...[
+            // Content when loaded (with sufficient data)
+            if (_deviceForecast != null &&
+                (_deviceForecast!['insufficient_data'] != true) &&
+                (_deviceForecast!['daily_forecast'] as List?)?.isNotEmpty == true) ...[
               _buildWeeklySnapshot(),
               const SizedBox(height: 16),
               _buildForecastChart(),
               const SizedBox(height: 16),
               _buildCostProjection(),
-              const SizedBox(height: 16),
-              _buildScenarioSimulation(),
             ],
+
+            // Insufficient data: forecast returned but no prediction (warning shown above)
+            if (_deviceForecast != null &&
+                (_deviceForecast!['insufficient_data'] == true) &&
+                !_forecastLoading)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: Text(
+                    'Future usage prediction is not available due to insufficient historical data. '
+                    'Keep the device connected and try again later.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                  ),
+                ),
+              ),
 
             // Empty state
             if (_forecastSelectedDeviceId == null &&
@@ -969,10 +1076,7 @@ class _DevicesPageState extends State<DevicesPage> {
       }).toList(),
       onChanged: (newId) {
         if (newId != null && newId != _forecastSelectedDeviceId) {
-          setState(() {
-            _forecastSelectedDeviceId = newId;
-            _scenarioReducedUsage = false;
-          });
+          setState(() => _forecastSelectedDeviceId = newId);
           _loadDeviceForecast(newId);
         }
       },
@@ -982,6 +1086,7 @@ class _DevicesPageState extends State<DevicesPage> {
   Widget _buildWeeklySnapshot() {
     final forecast = _deviceForecast!;
     final weeklyKwh = (forecast['weekly_total_kwh'] as num).toDouble();
+    final modelType = forecast['model_type'] as String? ?? 'lstm';
     final comparison = forecast['comparison'] as Map<String, dynamic>;
     final percentChange = (comparison['percent_change'] as num).toDouble();
     final trend = comparison['trend'] as String;
@@ -1021,8 +1126,6 @@ class _DevicesPageState extends State<DevicesPage> {
         trendColor = Colors.blue;
     }
 
-    final effectiveKwh = _scenarioReducedUsage ? weeklyKwh * 0.9 : weeklyKwh;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1036,35 +1139,42 @@ class _DevicesPageState extends State<DevicesPage> {
                     const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: riskColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: riskColor.withValues(alpha: 0.4)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    riskLevel == 'red'
-                        ? Icons.warning_amber
-                        : riskLevel == 'orange'
-                            ? Icons.info_outline
-                            : Icons.check_circle_outline,
-                    color: riskColor,
-                    size: 14,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    riskLabel,
-                    style: TextStyle(
+            Tooltip(
+              message: riskLevel == 'red'
+                  ? 'Predicted usage is significantly above your typical average. Consider reviewing usage patterns to manage costs.'
+                  : riskLevel == 'orange'
+                      ? 'Predicted usage is moderately above your typical average.'
+                      : 'Predicted usage is within normal range based on historical trends.',
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: riskColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: riskColor.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      riskLevel == 'red'
+                          ? Icons.warning_amber
+                          : riskLevel == 'orange'
+                              ? Icons.info_outline
+                              : Icons.check_circle_outline,
                       color: riskColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
+                      size: 14,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 4),
+                    Text(
+                      riskLabel,
+                      style: TextStyle(
+                        color: riskColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -1089,7 +1199,7 @@ class _DevicesPageState extends State<DevicesPage> {
                     Icon(Icons.bolt, color: Colors.indigo.shade600, size: 22),
                     const SizedBox(height: 4),
                     Text(
-                      '${effectiveKwh.toStringAsFixed(1)} kWh',
+                      '${weeklyKwh.toStringAsFixed(1)} kWh',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -1101,6 +1211,14 @@ class _DevicesPageState extends State<DevicesPage> {
                       style:
                           TextStyle(fontSize: 10, color: Colors.grey.shade600),
                     ),
+                    if (modelType == 'behavioral_profile')
+                      Text(
+                        'from usage pattern',
+                        style: TextStyle(
+                            fontSize: 9,
+                            color: Colors.indigo.shade600,
+                            fontStyle: FontStyle.italic),
+                      ),
                   ],
                 ),
               ),
@@ -1217,8 +1335,7 @@ class _DevicesPageState extends State<DevicesPage> {
     }
     for (int i = 0; i < dailyForecast.length; i++) {
       final day = dailyForecast[i] as Map<String, dynamic>;
-      double kwh = (day['predicted_kwh'] as num).toDouble();
-      if (_scenarioReducedUsage) kwh *= 0.9;
+      final kwh = (day['predicted_kwh'] as num).toDouble();
       forecastSpots.add(FlSpot((dailyHistorical.length + i).toDouble(), kwh));
     }
 
@@ -1227,12 +1344,8 @@ class _DevicesPageState extends State<DevicesPage> {
     final confHighSpots = <FlSpot>[];
     for (int i = 0; i < dailyForecast.length; i++) {
       final day = dailyForecast[i] as Map<String, dynamic>;
-      double low = (day['confidence_low_kwh'] as num).toDouble();
-      double high = (day['confidence_high_kwh'] as num).toDouble();
-      if (_scenarioReducedUsage) {
-        low *= 0.9;
-        high *= 0.9;
-      }
+      final low = (day['confidence_low_kwh'] as num).toDouble();
+      final high = (day['confidence_high_kwh'] as num).toDouble();
       final x = (dailyHistorical.length + i).toDouble();
       confLowSpots.add(FlSpot(x, low));
       confHighSpots.add(FlSpot(x, high));
@@ -1433,14 +1546,10 @@ class _DevicesPageState extends State<DevicesPage> {
                               (day['confidence_low_kwh'] as num).toDouble();
                           final confHigh =
                               (day['confidence_high_kwh'] as num).toDouble();
-                          final effectLow =
-                              _scenarioReducedUsage ? confLow * 0.9 : confLow;
-                          final effectHigh =
-                              _scenarioReducedUsage ? confHigh * 0.9 : confHigh;
                           return LineTooltipItem(
                             '${spot.y.toStringAsFixed(1)} kWh\n'
                             'Peak: ${peakHour.toString().padLeft(2, "0")}:00\n'
-                            'Range: ${effectLow.toStringAsFixed(1)}-${effectHigh.toStringAsFixed(1)}',
+                            'Range: ${confLow.toStringAsFixed(1)}-${confHigh.toStringAsFixed(1)}',
                             const TextStyle(color: Colors.white, fontSize: 11),
                           );
                         }
@@ -1539,16 +1648,9 @@ class _DevicesPageState extends State<DevicesPage> {
     final weeklyLkr = (cost['weekly_cost_lkr'] as num).toDouble();
     final monthlyLkr = (cost['monthly_projection_lkr'] as num).toDouble();
     final lastWeekLkr = (cost['last_week_cost_lkr'] as num).toDouble();
-    final savingsLkr =
-        (cost['weekly_savings_if_reduced_10pct_lkr'] as num).toDouble();
-
-    final effectiveWeekly = _scenarioReducedUsage ? weeklyLkr * 0.9 : weeklyLkr;
-    final effectiveMonthly =
-        _scenarioReducedUsage ? monthlyLkr * 0.9 : monthlyLkr;
-
     // Determine monthly change message
     final monthlyChange = lastWeekLkr > 0
-        ? ((effectiveWeekly - lastWeekLkr) / lastWeekLkr * 100)
+        ? ((weeklyLkr - lastWeekLkr) / lastWeekLkr * 100)
         : 0.0;
 
     return Container(
@@ -1566,11 +1668,18 @@ class _DevicesPageState extends State<DevicesPage> {
             children: [
               Icon(Icons.paid, color: Colors.green.shade700, size: 20),
               const SizedBox(width: 8),
-              const Text(
-                'Cost Projection (LKR)',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              const Expanded(
+                child: Text(
+                  'Cost Projection (LECO Tariff)',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                ),
               ),
             ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Based on LECO domestic block tariff (revised June 2025)',
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
           ),
           const SizedBox(height: 12),
           Row(
@@ -1578,15 +1687,15 @@ class _DevicesPageState extends State<DevicesPage> {
               Expanded(
                 child: _buildCostItem(
                   'Weekly Estimate',
-                  'Rs. ${effectiveWeekly.toStringAsFixed(0)}',
+                  'Rs. ${weeklyLkr.toStringAsFixed(0)}',
                   Colors.green.shade700,
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: _buildCostItem(
-                  'Monthly Trend',
-                  'Rs. ${effectiveMonthly.toStringAsFixed(0)}',
+                  'Monthly Cost',
+                  'Rs. ${monthlyLkr.toStringAsFixed(0)}',
                   Colors.blue.shade700,
                 ),
               ),
@@ -1637,30 +1746,6 @@ class _DevicesPageState extends State<DevicesPage> {
               ),
             ),
           ],
-          if (_scenarioReducedUsage) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.tertiaryContainer,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.savings, color: Colors.green.shade700, size: 16),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Potential savings: Rs. ${savingsLkr.toStringAsFixed(0)}/week',
-                    style: TextStyle(
-                      color: Colors.green.shade800,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -1690,35 +1775,6 @@ class _DevicesPageState extends State<DevicesPage> {
             textAlign: TextAlign.center,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildScenarioSimulation() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.tertiaryContainer,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        title: const Text(
-          'What if usage reduced by 10%?',
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          _scenarioReducedUsage
-              ? 'Showing adjusted forecast with 10% reduction'
-              : 'Toggle to see potential savings',
-          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-        ),
-        value: _scenarioReducedUsage,
-        onChanged: (val) => setState(() => _scenarioReducedUsage = val),
-        secondary: Icon(Icons.science, color: Colors.amber.shade800, size: 22),
-        activeColor: Colors.amber.shade700,
       ),
     );
   }
@@ -1812,7 +1868,7 @@ class _DevicesPageState extends State<DevicesPage> {
 
             // Content
             if (_deviceComparison != null && !_comparisonLoading) ...[
-              // Total summary
+              // Total summary (clamp to reasonable display range)
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
@@ -1825,7 +1881,7 @@ class _DevicesPageState extends State<DevicesPage> {
                     Column(
                       children: [
                         Text(
-                          '${(_deviceComparison!['total_predicted_kwh'] as num).toStringAsFixed(1)} kWh',
+                          _formatReasonableKwh((_deviceComparison!['total_predicted_kwh'] as num).toDouble(), maxKwh: 9999),
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
@@ -1833,7 +1889,7 @@ class _DevicesPageState extends State<DevicesPage> {
                           ),
                         ),
                         Text(
-                          'Total Predicted',
+                          'Weekly kWh',
                           style: TextStyle(
                               fontSize: 10, color: Colors.grey.shade600),
                         ),
@@ -1844,7 +1900,7 @@ class _DevicesPageState extends State<DevicesPage> {
                     Column(
                       children: [
                         Text(
-                          'Rs. ${(_deviceComparison!['total_weekly_cost_lkr'] as num).toStringAsFixed(0)}',
+                          'Rs. ${_formatReasonableCost((_deviceComparison!['total_weekly_cost_lkr'] as num).toDouble(), maxLkr: 999999)}',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
@@ -1853,6 +1909,25 @@ class _DevicesPageState extends State<DevicesPage> {
                         ),
                         Text(
                           'Weekly Cost',
+                          style: TextStyle(
+                              fontSize: 10, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                    Container(
+                        width: 1, height: 30, color: Colors.teal.shade200),
+                    Column(
+                      children: [
+                        Text(
+                          'Rs. ${_formatReasonableCost((_deviceComparison!['total_monthly_bill_lkr'] as num?)?.toDouble() ?? 0, maxLkr: 999999)}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: Colors.teal.shade800,
+                          ),
+                        ),
+                        Text(
+                          'Monthly Cost',
                           style: TextStyle(
                               fontSize: 10, color: Colors.grey.shade600),
                         ),
@@ -1891,8 +1966,9 @@ class _DevicesPageState extends State<DevicesPage> {
                 final device = entry.value as Map<String, dynamic>;
                 final name = device['device_name'] as String? ??
                     device['device_id'] as String;
-                final kwh = (device['predicted_weekly_kwh'] as num).toDouble();
-                final costLkr = (device['weekly_cost_lkr'] as num).toDouble();
+                // Clamp to reasonable range for display (per-device)
+                final kwh = ((device['predicted_weekly_kwh'] as num).toDouble()).clamp(0.0, 500.0);
+                final costLkr = ((device['weekly_cost_lkr'] as num).toDouble()).clamp(0.0, 50000.0);
                 final risk = device['risk_level'] as String? ?? 'green';
                 final pct = (device['percent_change'] as num?)?.toDouble() ?? 0;
                 final trendStr = device['trend'] as String? ?? 'stable';
@@ -2472,10 +2548,10 @@ class _DevicesPageState extends State<DevicesPage> {
     final hasReadings = readings.isNotEmpty;
     final latestReading = hasReadings ? readings.first : null;
 
-    // Check if device is active (last reading < 5 seconds)
+    // Check if device is active (energy reading in last 30 seconds)
     final lastReadingTime = _deviceLastReadings[deviceId];
     final isActive = lastReadingTime != null &&
-        DateTime.now().difference(lastReadingTime).inSeconds < 10;
+        DateTime.now().difference(lastReadingTime).inSeconds <= 30;
 
     // Determine anomaly status from ML detection results
     final anomalyData = _deviceAnomalies[deviceId];
@@ -2661,6 +2737,20 @@ class _DevicesPageState extends State<DevicesPage> {
                     isLoading: _anomalyLoading,
                     hasError: _anomalyError != null && anomalyData == null,
                   ),
+                  // Label button for research ground-truth collection
+                  if (isAnomaly && anomalyData != null) ...[
+                    const SizedBox(width: 4),
+                    GestureDetector(
+                      onTap: () => _showAnomalyLabelSheet(
+                        context,
+                        anomalyData['detected_at']?.toString() ?? deviceId,
+                      ),
+                      child: Tooltip(
+                        message: 'Label this anomaly',
+                        child: Icon(Icons.label_outline, size: 16, color: Colors.grey[500]),
+                      ),
+                    ),
+                  ],
                   const SizedBox(width: 8),
                   Icon(
                     isExpanded ? Icons.expand_less : Icons.expand_more,
@@ -2672,6 +2762,7 @@ class _DevicesPageState extends State<DevicesPage> {
                 ],
               ),
             ),
+            _buildRelayControl(deviceId),
             if (isExpanded)
               _buildExpandedContent(deviceId, device, readings, faults),
           ],
@@ -2747,6 +2838,62 @@ class _DevicesPageState extends State<DevicesPage> {
       Icons.check_circle,
       color: statusColor,
       size: 28,
+    );
+  }
+
+  void _showAnomalyLabelSheet(BuildContext ctx, String anomalyKey) {
+    showModalBottomSheet(
+      context: ctx,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(Icons.label, size: 18, color: Theme.of(ctx).colorScheme.primary),
+                const SizedBox(width: 8),
+                const Text('Label this anomaly', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              ]),
+              const SizedBox(height: 6),
+              Text(
+                'Your label helps improve anomaly detection precision.',
+                style: TextStyle(fontSize: 12, color: Theme.of(ctx).colorScheme.onSurface.withOpacity(0.6)),
+              ),
+              const SizedBox(height: 16),
+              _labelOption(ctx, sheetCtx, anomalyKey, 'true_positive', 'Real Anomaly', Icons.check_circle, Colors.red),
+              const SizedBox(height: 8),
+              _labelOption(ctx, sheetCtx, anomalyKey, 'false_positive', 'False Alarm', Icons.cancel, Colors.green),
+              const SizedBox(height: 8),
+              _labelOption(ctx, sheetCtx, anomalyKey, 'unsure', 'Not Sure', Icons.help_outline, Colors.grey),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _labelOption(BuildContext ctx, BuildContext sheetCtx, String anomalyKey,
+      String label, String display, IconData icon, Color color) {
+    return ListTile(
+      leading: Icon(icon, color: color),
+      title: Text(display),
+      onTap: () async {
+        Navigator.pop(sheetCtx);
+        final success = await _evalService.labelAnomaly(anomalyKey, label);
+        if (!mounted) return;
+        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+          content: Text(success ? 'Labeled as "$display"' : 'Failed to save label'),
+          duration: const Duration(seconds: 2),
+        ));
+      },
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      tileColor: color.withOpacity(0.06),
     );
   }
 
@@ -3009,6 +3156,26 @@ class _DevicesPageState extends State<DevicesPage> {
                 color: Colors.grey[700],
                 fontStyle: FontStyle.italic),
           ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.7),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.shield_outlined, size: 14, color: Colors.grey[700]),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Auto shutoff: If abnormal power is detected by the model, the device may be turned off automatically to protect the circuit. This only happens when the model flags a real issue.',
+                    style: TextStyle(fontSize: 10, color: Colors.grey[700]),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -3131,8 +3298,8 @@ class _DevicesPageState extends State<DevicesPage> {
         ),
         const SizedBox(height: 12),
 
-        // Sparkline
-        _buildSparkline(readings),
+        // Sparkline (Device Insight chart with time and current axes)
+        _buildSparkline(readings, timeRange),
         const SizedBox(height: 16),
 
         Card(
@@ -3208,7 +3375,7 @@ class _DevicesPageState extends State<DevicesPage> {
                 Icons.signal_cellular_alt),
             _buildStatCard(
                 'Latest',
-                _formatTime(latestReading.receivedAt.toLocal()),
+                _formatSriLankaTime(latestReading.receivedAt),
                 Icons.access_time),
           ],
         ),
@@ -3273,36 +3440,79 @@ class _DevicesPageState extends State<DevicesPage> {
     );
   }
 
-  Widget _buildSparkline(List<EnergyReading> readings) {
-    // Sample readings for sparkline (max 100 points)
-    final sampleSize = readings.length > 100 ? 100 : readings.length;
-    final step = readings.length > 100 ? (readings.length / 100).ceil() : 1;
-    final sampledReadings = <EnergyReading>[];
-    for (int i = 0; i < readings.length; i += step) {
-      sampledReadings.add(readings[i]);
-      if (sampledReadings.length >= sampleSize) break;
+  Widget _buildSparkline(List<EnergyReading> readings, TimeRange timeRange) {
+    if (readings.isEmpty) return const SizedBox.shrink();
+
+    final bool is7Days = timeRange == TimeRange.days7;
+    final List<FlSpot> spots;
+    final double minX;
+    final double maxX;
+    final double verticalInterval;
+    final String Function(int) bottomLabel;
+
+    if (is7Days) {
+      // Aggregate by day index (0..6): X = day, Y = average current (A)
+      final sorted = List<EnergyReading>.from(readings)
+        ..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
+      final startDate = sorted.first.receivedAt.toLocal();
+      final startDay = DateTime(startDate.year, startDate.month, startDate.day);
+
+      final daySums = <int, double>{};
+      final dayCounts = <int, int>{};
+      for (int d = 0; d < 7; d++) {
+        daySums[d] = 0.0;
+        dayCounts[d] = 0;
+      }
+      for (final r in sorted) {
+        final local = r.receivedAt.toLocal();
+        final readingDay = DateTime(local.year, local.month, local.day);
+        final dayIndex = readingDay.difference(startDay).inDays.clamp(0, 6);
+        daySums[dayIndex] = (daySums[dayIndex] ?? 0) + r.currentA;
+        dayCounts[dayIndex] = (dayCounts[dayIndex] ?? 0) + 1;
+      }
+      spots = [];
+      for (int d = 0; d < 7; d++) {
+        final count = dayCounts[d] ?? 0;
+        final avg = count > 0 ? (daySums[d]! / count) : 0.0;
+        spots.add(FlSpot(d.toDouble(), avg));
+      }
+      minX = 0;
+      maxX = 6;
+      verticalInterval = 1;
+      bottomLabel = (v) => 'Day ${v + 1}';
+    } else {
+      // Aggregate by hour of day (0-23): X = time of day, Y = average current (A)
+      final hourSums = <int, double>{};
+      final hourCounts = <int, int>{};
+      for (int h = 0; h < 24; h++) {
+        hourSums[h] = 0.0;
+        hourCounts[h] = 0;
+      }
+      for (final r in readings) {
+        final local = r.receivedAt.toLocal();
+        final hour = local.hour;
+        hourSums[hour] = (hourSums[hour] ?? 0) + r.currentA;
+        hourCounts[hour] = (hourCounts[hour] ?? 0) + 1;
+      }
+      spots = [];
+      for (int h = 0; h < 24; h++) {
+        final count = hourCounts[h] ?? 0;
+        final avg = count > 0 ? (hourSums[h]! / count) : 0.0;
+        spots.add(FlSpot(h.toDouble(), avg));
+      }
+      minX = 0;
+      maxX = 24;
+      verticalInterval = 6;
+      bottomLabel = (v) => v == 24 ? '24:00' : '${v.toString().padLeft(2, '0')}:00';
     }
-    final displayReadings = sampledReadings.reversed.toList();
-    if (displayReadings.isEmpty) return const SizedBox.shrink();
 
-    final maxCurrent =
-        displayReadings.map((r) => r.currentA).reduce((a, b) => a > b ? a : b);
-    final minCurrent =
-        displayReadings.map((r) => r.currentA).reduce((a, b) => a < b ? a : b);
-    final range = (maxCurrent - minCurrent).abs();
-    final padding = range * 0.1;
-
-    final spots = displayReadings.asMap().entries.map((entry) {
-      final index = entry.key;
-      final reading = entry.value;
-      final normalized = range > 0
-          ? ((reading.currentA - minCurrent + padding) / (range + padding * 2))
-          : 0.5;
-      return FlSpot(index.toDouble(), 1 - normalized);
-    }).toList();
+    final maxCurrent = spots.isEmpty
+        ? 1.0
+        : spots.map((s) => s.y).reduce((a, b) => a > b ? a : b);
+    final chartMaxY = maxCurrent > 0 ? maxCurrent * 1.2 : 1.0;
 
     return Container(
-      height: 100,
+      height: 120,
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerLowest,
@@ -3310,8 +3520,62 @@ class _DevicesPageState extends State<DevicesPage> {
       ),
       child: LineChart(
         LineChartData(
-          gridData: const FlGridData(show: false),
-          titlesData: const FlTitlesData(show: false),
+          minX: minX,
+          maxX: maxX,
+          minY: 0,
+          maxY: chartMaxY,
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: true,
+            verticalInterval: verticalInterval,
+            horizontalInterval: chartMaxY > 0 ? chartMaxY / 4 : 1,
+            getDrawingHorizontalLine: (value) => FlLine(
+              color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5),
+              strokeWidth: 1,
+            ),
+            getDrawingVerticalLine: (value) => FlLine(
+              color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.3),
+              strokeWidth: 0.5,
+            ),
+          ),
+          titlesData: FlTitlesData(
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 36,
+                interval: chartMaxY > 0 ? chartMaxY / 4 : 1,
+                getTitlesWidget: (value, meta) => Text(
+                  '${value.toStringAsFixed(2)} A',
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                  ),
+                ),
+              ),
+            ),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 24,
+                interval: verticalInterval,
+                getTitlesWidget: (value, meta) {
+                  final v = value.round().clamp(0, is7Days ? 6 : 24);
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      bottomLabel(v),
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          ),
           borderData: FlBorderData(show: false),
           lineBarsData: [
             LineChartBarData(
@@ -3326,8 +3590,6 @@ class _DevicesPageState extends State<DevicesPage> {
               ),
             ),
           ],
-          minY: 0,
-          maxY: 1,
         ),
       ),
     );
@@ -3504,6 +3766,27 @@ class _DevicesPageState extends State<DevicesPage> {
       return parsed ?? DateTime.now();
     }
     return DateTime.now();
+  }
+
+  /// receivedAt from backend is UTC (DateTime.utcnow()). Sri Lanka = UTC+5:30.
+  /// Compute Sri Lanka date/time by adding 5h 30m to UTC components.
+  String _formatSriLankaTime(DateTime dateTime) {
+    final utc = dateTime.toUtc();
+    // Add 5 hours 30 minutes; DateTime handles day/month rollover
+    final sl = DateTime.utc(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour + 5,
+      utc.minute + 30,
+      utc.second,
+      utc.millisecond,
+    );
+    final day = sl.day.toString().padLeft(2, '0');
+    final month = sl.month.toString().padLeft(2, '0');
+    final hour = sl.hour.toString().padLeft(2, '0');
+    final minute = sl.minute.toString().padLeft(2, '0');
+    return '$day/$month $hour:$minute';
   }
 
   String _formatTime(DateTime dateTime) {

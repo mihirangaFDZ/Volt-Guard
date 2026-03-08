@@ -1,16 +1,22 @@
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends
-from database import analytics_col, energy_col, devices_col
-from utils.jwt_handler import get_current_user
+from fastapi import APIRouter, Depends, Body
+from pydantic import BaseModel
+from bson.objectid import ObjectId
+from database import analytics_col, energy_col, devices_col, energy_advice_history_col
+from app.services.current_energy_recommendation_model import CurrentEnergyRecommendationModel
+from utils.jwt_handler import get_current_user_optional
 from app.models.analytics_model import (
     Recommendation,
     RecommendationSeverity,
     RecommendationsResponse,
 )
 
-router = APIRouter(prefix="/analytics", tags=["Analytics"])
-
+router = APIRouter(
+    prefix="/analytics",
+    tags=["Analytics"],
+    dependencies=[Depends(get_current_user_optional)],
+)
 
 # Sri Lankan timezone (UTC+5:30)
 SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
@@ -444,6 +450,7 @@ def get_current_energy_stats(
         return {
             "total_readings": 0,
             "latest": None,
+            "readings": [],
             "current_a": {
                 "latest": 0.0,
                 "avg": 0.0,
@@ -556,6 +563,16 @@ def get_current_energy_stats(
     if first_ts and last_ts:
         time_window_minutes = int((last_ts - first_ts).total_seconds() / 60)
 
+    # Expose recent readings for frontend (when devices are connected)
+    readings_for_client = []
+    for d in docs[:50]:
+        doc_copy = dict(d)
+        # Ensure received_at is ISO string for JSON
+        ra = doc_copy.get("received_at") or doc_copy.get("receivedAt") or doc_copy.get("timestamp")
+        if hasattr(ra, "isoformat"):
+            doc_copy["received_at"] = ra.isoformat()
+        readings_for_client.append(doc_copy)
+
     # Estimate energy (simple integration)
     estimated_kwh = 0.0
     for i in range(1, len(docs)):
@@ -593,6 +610,7 @@ def get_current_energy_stats(
     return {
         "total_readings": len(docs),
         "latest": latest,
+        "readings": readings_for_client,
         "current_a": {
             "latest": round(latest_current_a, 6),
             "avg": round(avg_current_a, 6),
@@ -620,3 +638,146 @@ def get_current_energy_stats(
         },
         "time_window_minutes": time_window_minutes,
     }
+
+
+# ------------------------------------------------------------------
+# Current energy recommendations (trained model from CSV dataset)
+# ------------------------------------------------------------------
+
+
+@router.get("/current-energy-recommendations")
+def get_current_energy_recommendations(
+    current_a: float,
+    current_ma: Optional[float] = None,
+    power_w: Optional[float] = None,
+    trend_direction: Optional[str] = "stable",
+    trend_percent_change: Optional[float] = 0.0,
+    signal_quality: Optional[str] = "unknown",
+):
+    """
+    Get recommendations for current energy analysis using the trained model.
+    Model is trained on the current_energy_recommendations_dataset.csv (2000 rows).
+    Returns accurate, user-understandable advice, savings, waste, and mitigation.
+    """
+    model = CurrentEnergyRecommendationModel()
+    if not model.load_model():
+        return {"recommendations": [], "message": "Model not trained. Run scripts/train_current_energy_recommendation_model.py"}
+    recs = model.predict(
+        current_a=current_a,
+        current_ma=current_ma,
+        power_w=power_w,
+        trend_direction=trend_direction or "stable",
+        trend_percent_change=trend_percent_change or 0.0,
+        signal_quality=signal_quality or "unknown",
+    )
+    return {"recommendations": recs}
+
+
+# ------------------------------------------------------------------
+# Energy advice & recommendations history (save and list)
+# ------------------------------------------------------------------
+
+
+class ReadingSnapshot(BaseModel):
+    """Snapshot of readings when recommendations were generated."""
+    current_a: float
+    current_ma: Optional[float] = None
+    power_w: Optional[float] = None
+    trend_direction: Optional[str] = "stable"
+    trend_percent_change: Optional[float] = 0.0
+    signal_quality: Optional[str] = None
+    location: Optional[str] = None
+    module: Optional[str] = None
+
+
+class RecommendationItem(BaseModel):
+    title: str
+    message: str
+    severity: str
+    advice: Optional[str] = None
+    mitigation: Optional[str] = None
+    estimated_savings_kwh_per_day: Optional[float] = None
+    energy_wasted_kwh_per_day: Optional[float] = None
+
+
+class EnergyAdviceHistoryPayload(BaseModel):
+    readings_snapshot: ReadingSnapshot
+    recommendations: List[RecommendationItem]
+
+
+@router.post("/energy-advice-history")
+def save_energy_advice_history(payload: EnergyAdviceHistoryPayload = Body(...)):
+    """
+    Save current energy advice and recommendations with readings snapshot to history table.
+    """
+    doc = {
+        "created_at": datetime.utcnow(),
+        "readings_snapshot": payload.readings_snapshot.model_dump(),
+        "recommendations": [r.model_dump() for r in payload.recommendations],
+    }
+    result = energy_advice_history_col.insert_one(doc)
+    return {"ok": True, "id": str(result.inserted_id)}
+
+
+@router.get("/energy-advice-history")
+def get_energy_advice_history(
+    limit: int = 50,
+    since: Optional[str] = None,
+    before: Optional[str] = None,
+):
+    """
+    Get history of energy advice and recommendations with readings (newest first).
+    Optional: since / before as ISO datetime strings for filtering.
+    """
+    query = {}
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            query["created_at"] = {"$gte": since_dt}
+        except ValueError:
+            pass
+    if before:
+        try:
+            before_dt = datetime.fromisoformat(before.replace("Z", "+00:00"))
+            query.setdefault("created_at", {})["$lt"] = before_dt
+        except ValueError:
+            pass
+
+    cursor = (
+        energy_advice_history_col
+        .find(query)
+        .sort("created_at", -1)
+        .limit(limit)
+    )
+    items = []
+    for d in cursor:
+        d = dict(d)
+        d["id"] = str(d.pop("_id", ""))
+        created = d.get("created_at")
+        if hasattr(created, "isoformat"):
+            d["created_at"] = created.isoformat() + ("Z" if created.tzinfo is None else "")
+        items.append(d)
+    return {"items": items, "count": len(items)}
+
+
+class EnergyAdviceHistoryDeletePayload(BaseModel):
+    ids: List[str]
+
+
+@router.delete("/energy-advice-history")
+def delete_energy_advice_history(payload: EnergyAdviceHistoryDeletePayload = Body(...)):
+    """
+    Delete selected energy advice history entries by id.
+    """
+    if not payload.ids:
+        return {"ok": True, "deleted_count": 0}
+    object_ids = []
+    for oid in payload.ids:
+        try:
+            object_ids.append(ObjectId(oid))
+        except Exception:
+            continue
+    if not object_ids:
+        return {"ok": True, "deleted_count": 0}
+    result = energy_advice_history_col.delete_many({"_id": {"$in": object_ids}})
+    return {"ok": True, "deleted_count": result.deleted_count}

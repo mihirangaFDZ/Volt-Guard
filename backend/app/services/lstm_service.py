@@ -13,8 +13,10 @@ from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import pickle
+import json
 from pathlib import Path
 from typing import Tuple, List
+from datetime import datetime, timezone
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -205,11 +207,63 @@ class LSTMPredictor:
         print(f"Root Mean Squared Error (RMSE): {rmse:.4f} W")
         print(f"R² Score (closer to 1 is better): {r2:.4f}")
         print(f"{'='*60}\n")
-        
+
+        # --- Persist evaluation metrics to disk for research reporting ---
+        y_test_flat = y_test_actual.flatten()
+        y_pred_flat = y_pred.flatten()
+
+        # Naive baseline: predict last observed value
+        baseline_last_value = y_test_flat[:-1]  # shift by 1
+        baseline_last_rmse = float(np.sqrt(mean_squared_error(y_test_flat[1:], baseline_last_value)))
+
+        # Rolling-mean baseline: 24-step window mean
+        window = min(24, len(y_test_flat) - 1)
+        rolling_preds = [np.mean(y_test_flat[max(0, i - window):i]) for i in range(1, len(y_test_flat))]
+        baseline_rolling_rmse = float(np.sqrt(mean_squared_error(y_test_flat[1:], rolling_preds)))
+
+        best_baseline_rmse = min(baseline_last_rmse, baseline_rolling_rmse)
+        improvement_pct = round((best_baseline_rmse - rmse) / best_baseline_rmse * 100, 2) if best_baseline_rmse > 0 else 0.0
+
+        # Empirical 90% confidence interval from residuals
+        residuals = y_test_flat - y_pred_flat
+        residual_mean = float(np.mean(residuals))
+        residual_std = float(np.std(residuals))
+        ci_lower = round(residual_mean - 1.645 * residual_std, 4)
+        ci_upper = round(residual_mean + 1.645 * residual_std, 4)
+
+        epochs_trained = len(history.history['loss'])
+
+        evaluation = {
+            "rmse": round(float(rmse), 4),
+            "mae": round(float(mae), 4),
+            "r2": round(float(r2), 4),
+            "train_size": int(len(X_train)),
+            "test_size": int(len(X_test)),
+            "baseline_rmse_last_value": round(baseline_last_rmse, 4),
+            "baseline_rmse_rolling": round(baseline_rolling_rmse, 4),
+            "improvement_vs_best_baseline_pct": improvement_pct,
+            "ci_90_lower_offset_w": ci_lower,
+            "ci_90_upper_offset_w": ci_upper,
+            "epochs_trained": epochs_trained,
+            "sequence_length": self.sequence_length,
+            "feature_columns": self.feature_columns,
+            "split_method": "chronological_80_20",
+            "trained_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        eval_path = self.model_dir / 'lstm_evaluation.json'
+        with open(eval_path, 'w') as f:
+            json.dump(evaluation, f, indent=2)
+        print(f"Saved evaluation metrics to {eval_path}")
+        print(f"  Baseline (last-value) RMSE: {baseline_last_rmse:.4f} W")
+        print(f"  Baseline (rolling-mean) RMSE: {baseline_rolling_rmse:.4f} W")
+        print(f"  LSTM improvement vs best baseline: {improvement_pct:.1f}%")
+        # -----------------------------------------------------------------
+
         # Save model and scalers
         self.save_model()
         self.is_trained = True
-        
+
         return history
     
     def predict(self, df: pd.DataFrame, steps_ahead: int = 24) -> pd.DataFrame:

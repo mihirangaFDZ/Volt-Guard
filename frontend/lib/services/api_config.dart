@@ -27,11 +27,17 @@ class ApiConfig {
   static const String faultsEndpoint = '/faults';
   static const String mlTrainingEndpoint = '/ml-training';
   static const String behavioralProfilesEndpoint = '/behavioral-profiles';
+  static const String modelEvaluationEndpoint = '/model-evaluation';
+
+  static const String optimizationEndpoint = '/optimization';
+
   static const String chatbotEndpoint = '/chatbot';
   static const String dashboardEndpoint = '/dashboard';
 
   // Request timeout duration
   static const Duration requestTimeout = Duration(seconds: 30);
+  // Longer timeout for analytics/optimization (backend may be slow)
+  static const Duration analyticsRequestTimeout = Duration(seconds: 60);
 
   // Environment-specific configurations
   static bool get isDevelopment => _environment == Environment.development;

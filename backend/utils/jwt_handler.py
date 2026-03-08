@@ -57,3 +57,23 @@ async def get_current_user(
         )
 
     return user
+
+
+async def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+):
+    """
+    Optional auth: returns user dict if valid token is present, else None.
+    Use for routes that allow both authenticated and anonymous read access (e.g. analytics dashboard).
+    """
+    if not credentials or not (credentials.credentials or "").strip():
+        return None
+    try:
+        payload = decode_access_token(credentials.credentials)
+        user_id = payload.get("user_id")
+        if not user_id:
+            return None
+        user = user_col.find_one({"user_id": user_id}, {"_id": 0, "password": 0})
+        return user
+    except HTTPException:
+        return None
