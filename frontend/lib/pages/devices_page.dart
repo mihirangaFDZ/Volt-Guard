@@ -63,6 +63,7 @@ class _DevicesPageState extends State<DevicesPage> {
   Map<String, dynamic>? _deviceForecast;
   bool _forecastLoading = false;
   String? _forecastError;
+  String? _forecastWarning;
   // Device comparison state
   Map<String, dynamic>? _deviceComparison;
   bool _comparisonLoading = false;
@@ -111,16 +112,24 @@ class _DevicesPageState extends State<DevicesPage> {
       });
       _loadAnomalyDetection();
 
+      // Hit energy-readings for every device so active devices count is correct
+      _loadLastReadingsForActiveCount();
+
       // Forecast, comparison, and energy vampires in background
       final devicesWithModule = _devices
           .where((d) =>
               d['module_id'] != null && (d['module_id'] as String).isNotEmpty)
           .toList();
       if (devicesWithModule.isNotEmpty) {
-        final firstId = devicesWithModule.first['device_id'] as String? ?? '';
-        if (firstId.isNotEmpty) {
-          setState(() => _forecastSelectedDeviceId = firstId);
-          _loadDeviceForecast(firstId);
+        final currentSelected = _forecastSelectedDeviceId;
+        final validSelected = currentSelected != null &&
+            devicesWithModule.any((d) => (d['device_id'] as String?) == currentSelected);
+        final idToLoad = validSelected
+            ? currentSelected!
+            : devicesWithModule.first['device_id'] as String? ?? '';
+        if (idToLoad.isNotEmpty) {
+          setState(() => _forecastSelectedDeviceId = idToLoad);
+          _loadDeviceForecast(idToLoad);
         }
         _loadDeviceComparison();
       }
@@ -139,13 +148,16 @@ class _DevicesPageState extends State<DevicesPage> {
     setState(() {
       _forecastLoading = true;
       _forecastError = null;
+      _forecastWarning = null;
       _deviceForecast = null;
     });
     try {
       final forecast = await _predictionService.fetchDeviceForecast(deviceId);
       if (!mounted) return;
+      final warning = forecast['warning'] as String?;
       setState(() {
         _deviceForecast = forecast;
+        _forecastWarning = warning;
         _forecastLoading = false;
       });
     } catch (e) {
@@ -473,6 +485,53 @@ class _DevicesPageState extends State<DevicesPage> {
       _timeRanges[deviceId] = range;
     });
     _loadDeviceReadings(deviceId);
+  }
+
+  /// Fetches the latest energy reading for each device (limit=1) so that
+  /// _deviceLastReadings is populated and active devices count is correct on page load.
+  Future<void> _loadLastReadingsForActiveCount() async {
+    final deviceIds = _devices
+        .map((d) => d['device_id'] as String?)
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toList();
+    if (deviceIds.isEmpty) return;
+
+    final results = await Future.wait(
+      deviceIds.map((deviceId) async {
+        try {
+          return _deviceService.fetchDeviceEnergyReadings(
+            deviceId,
+            limit: 1,
+            hours: 24,
+          );
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      for (var i = 0; i < deviceIds.length; i++) {
+        final data = results[i];
+        if (data == null) continue;
+        final readings = data['readings'] as List<EnergyReading>? ?? [];
+        if (readings.isNotEmpty) {
+          _deviceLastReadings[deviceIds[i]] = readings.first.receivedAt;
+        }
+      }
+      final now = DateTime.now();
+      int activeCount = 0;
+      for (final device in _devices) {
+        final id = device['device_id'] as String? ?? '';
+        final lastReading = _deviceLastReadings[id];
+        if (lastReading != null && now.difference(lastReading).inSeconds <= 30) {
+          activeCount++;
+        }
+      }
+      _activeDevices = activeCount;
+    });
   }
 
   void _recalculateActiveDevices() {
@@ -842,6 +901,38 @@ class _DevicesPageState extends State<DevicesPage> {
             _buildForecastDeviceDropdown(),
             const SizedBox(height: 16),
 
+            // Warning (insufficient or limited data)
+            if (_forecastWarning != null && !_forecastLoading)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.tertiaryContainer.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.5),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline,
+                        color: Theme.of(context).colorScheme.tertiary,
+                        size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _forecastWarning!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onTertiaryContainer,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             // Error state
             if (_forecastError != null && !_forecastLoading)
               Container(
@@ -894,14 +985,32 @@ class _DevicesPageState extends State<DevicesPage> {
                 ),
               ),
 
-            // Content when loaded
-            if (_deviceForecast != null) ...[
+            // Content when loaded (with sufficient data)
+            if (_deviceForecast != null &&
+                (_deviceForecast!['insufficient_data'] != true) &&
+                (_deviceForecast!['daily_forecast'] as List?)?.isNotEmpty == true) ...[
               _buildWeeklySnapshot(),
               const SizedBox(height: 16),
               _buildForecastChart(),
               const SizedBox(height: 16),
               _buildCostProjection(),
             ],
+
+            // Insufficient data: forecast returned but no prediction (warning shown above)
+            if (_deviceForecast != null &&
+                (_deviceForecast!['insufficient_data'] == true) &&
+                !_forecastLoading)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: Text(
+                    'Future usage prediction is not available due to insufficient historical data. '
+                    'Keep the device connected and try again later.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                  ),
+                ),
+              ),
 
             // Empty state
             if (_forecastSelectedDeviceId == null &&
@@ -1030,35 +1139,42 @@ class _DevicesPageState extends State<DevicesPage> {
                     const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: riskColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: riskColor.withValues(alpha: 0.4)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    riskLevel == 'red'
-                        ? Icons.warning_amber
-                        : riskLevel == 'orange'
-                            ? Icons.info_outline
-                            : Icons.check_circle_outline,
-                    color: riskColor,
-                    size: 14,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    riskLabel,
-                    style: TextStyle(
+            Tooltip(
+              message: riskLevel == 'red'
+                  ? 'Predicted usage is significantly above your typical average. Consider reviewing usage patterns to manage costs.'
+                  : riskLevel == 'orange'
+                      ? 'Predicted usage is moderately above your typical average.'
+                      : 'Predicted usage is within normal range based on historical trends.',
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: riskColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: riskColor.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      riskLevel == 'red'
+                          ? Icons.warning_amber
+                          : riskLevel == 'orange'
+                              ? Icons.info_outline
+                              : Icons.check_circle_outline,
                       color: riskColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
+                      size: 14,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 4),
+                    Text(
+                      riskLabel,
+                      style: TextStyle(
+                        color: riskColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -1578,7 +1694,7 @@ class _DevicesPageState extends State<DevicesPage> {
               const SizedBox(width: 8),
               Expanded(
                 child: _buildCostItem(
-                  'Monthly Bill',
+                  'Monthly Cost',
                   'Rs. ${monthlyLkr.toStringAsFixed(0)}',
                   Colors.blue.shade700,
                 ),
@@ -1811,7 +1927,7 @@ class _DevicesPageState extends State<DevicesPage> {
                           ),
                         ),
                         Text(
-                          'Monthly Bill',
+                          'Monthly Cost',
                           style: TextStyle(
                               fontSize: 10, color: Colors.grey.shade600),
                         ),

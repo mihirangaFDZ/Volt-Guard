@@ -24,6 +24,11 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
+# Minimum readings required to run prediction; below this we return a warning instead of predicting
+MIN_READINGS_FOR_PREDICTION = 10
+# Below this count we add a "limited data" warning; predictions still run but may be less accurate
+RECOMMENDED_READINGS_FOR_ACCURACY = 50
+
 # Initialize LSTM service (lazy loading with thread safety)
 _lstm_service = None
 _lstm_lock = threading.Lock()
@@ -167,8 +172,23 @@ def predict_energy(
                 "received_at": timestamp
             })
 
-        if len(data) < 10:
-            raise HTTPException(status_code=400, detail="Not enough data for prediction. Need at least 10 readings.")
+        if len(data) < MIN_READINGS_FOR_PREDICTION:
+            return {
+                "model_type": "lstm",
+                "location": location,
+                "hours_ahead": 0,
+                "predictions": [],
+                "average_power": 0.0,
+                "predicted_energy_kwh": 0.0,
+                "insufficient_data": True,
+                "warning": (
+                    "Not enough historical data for a reliable prediction. "
+                    "We need at least 10 energy readings from the last 48 hours. "
+                    "Keep the device connected and try again after more data is collected."
+                ),
+                "readings_available": len(data),
+                "readings_required": MIN_READINGS_FOR_PREDICTION,
+            }
 
         df = pd.DataFrame(data)
         df = df.sort_values('received_at')
@@ -190,7 +210,7 @@ def predict_energy(
         }
         prediction_col.insert_one(prediction_doc)
 
-        return {
+        response = {
             "model_type": "lstm",
             "location": location,
             "hours_ahead": len(predictions),
@@ -205,6 +225,12 @@ def predict_energy(
             "average_power": avg_power,
             "predicted_energy_kwh": float(avg_power / 1000.0)
         }
+        if len(data) < RECOMMENDED_READINGS_FOR_ACCURACY:
+            response["warning"] = (
+                "Limited historical data ({} readings). Predictions may be less accurate. "
+                "More readings over 24–48 hours will improve reliability."
+            ).format(len(data))
+        return response
 
     except HTTPException:
         raise
@@ -253,11 +279,24 @@ def weekly_forecast(
                 "received_at": ts,
             })
 
-        if len(data) < 10:
-            raise HTTPException(
-                status_code=400,
-                detail="Not enough recent data for a weekly forecast. Need at least 10 readings.",
-            )
+        if len(data) < MIN_READINGS_FOR_PREDICTION:
+            now = datetime.utcnow()
+            return {
+                "model_type": "lstm",
+                "location": location,
+                "forecast_days": 0,
+                "weekly_total_kwh": 0.0,
+                "daily_breakdown": [],
+                "generated_at": now.isoformat(),
+                "insufficient_data": True,
+                "warning": (
+                    "Not enough historical data for a weekly forecast. "
+                    "We need at least 10 energy readings from the last 48 hours. "
+                    "Keep devices connected and try again after more data is collected."
+                ),
+                "readings_available": len(data),
+                "readings_required": MIN_READINGS_FOR_PREDICTION,
+            }
 
         df = _add_time_features(pd.DataFrame(data).sort_values("received_at"))
 
@@ -305,7 +344,7 @@ def weekly_forecast(
             "daily_breakdown": daily_breakdown,
         })
 
-        return {
+        response = {
             "model_type": "lstm",
             "location": location,
             "forecast_days": len(daily_breakdown),
@@ -313,6 +352,12 @@ def weekly_forecast(
             "daily_breakdown": daily_breakdown,
             "generated_at": datetime.utcnow().isoformat(),
         }
+        if len(data) < RECOMMENDED_READINGS_FOR_ACCURACY:
+            response["warning"] = (
+                "Limited historical data ({} readings). Forecast may be less accurate. "
+                "More readings over 24–48 hours will improve reliability."
+            ).format(len(data))
+        return response
 
     except HTTPException:
         raise
@@ -552,12 +597,45 @@ def device_forecast(
                 if parsed:
                     recent_data.append(parsed)
 
-        if len(recent_data) < 10:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Not enough data for device {device_id} (module: {module_id}). "
-                       f"Found {len(recent_data)} readings, need at least 10.",
-            )
+        if len(recent_data) < MIN_READINGS_FOR_PREDICTION:
+            return {
+                "device_id": device_id,
+                "device_name": device_name,
+                "module_id": module_id,
+                "location": location,
+                "model_type": "none",
+                "forecast_days": 0,
+                "weekly_total_kwh": 0.0,
+                "daily_forecast": [],
+                "historical_days": 0,
+                "historical_total_kwh": 0.0,
+                "daily_historical": [],
+                "comparison": {
+                    "percent_change": 0.0,
+                    "trend": "stable",
+                    "risk_level": "green",
+                    "risk_reason": "Insufficient historical data for comparison.",
+                    "historical_avg_daily_kwh": 0.0,
+                },
+                "cost": {
+                    "tariff_type": "LECO_domestic_block",
+                    "effective_rate_per_kwh": 0.0,
+                    "weekly_cost_lkr": 0.0,
+                    "monthly_projection_lkr": 0.0,
+                    "last_week_cost_lkr": 0.0,
+                    "weekly_savings_if_reduced_10pct_lkr": 0.0,
+                    "tariff_breakdown": [],
+                },
+                "generated_at": now.isoformat(),
+                "insufficient_data": True,
+                "warning": (
+                    "Not enough historical data for this device to predict future usage. "
+                    "We need at least 10 energy readings (found {}). "
+                    "Keep the device connected and try again after more data is collected."
+                ).format(len(recent_data)),
+                "readings_available": len(recent_data),
+                "readings_required": MIN_READINGS_FOR_PREDICTION,
+            }
 
         # Historical daily aggregation (last 7 days)
         hist_start = now - timedelta(days=7)
@@ -657,15 +735,23 @@ def device_forecast(
             trend = "stable"
 
         # Risk level based on forecast vs historical average
+        risk_ratio = None
         if historical_avg_daily > 0:
             forecast_avg_daily = weekly_total_kwh / 7.0
             ratio = forecast_avg_daily / historical_avg_daily
+            risk_ratio = round((ratio - 1.0) * 100, 1)  # e.g. 1.47 -> 47% above
             if ratio > 1.3:
                 risk_level = "red"
-                risk_reason = "Predicted consumption significantly above historical average. Review device usage patterns."
+                risk_reason = (
+                    f"Predicted usage is {risk_ratio:.0f}% above your typical average. "
+                    "This may indicate increased usage or a change in patterns. Review device usage to manage costs."
+                )
             elif ratio > 1.1:
                 risk_level = "orange"
-                risk_reason = "Predicted increase due to rising usage pattern."
+                risk_reason = (
+                    f"Predicted usage is {risk_ratio:.0f}% above your typical average. "
+                    "Slight increase expected based on recent patterns."
+                )
             else:
                 risk_level = "green"
                 risk_reason = "Normal consumption expected based on historical trends."
@@ -700,7 +786,7 @@ def device_forecast(
             "daily_forecast": daily_forecast,
         })
 
-        return {
+        response = {
             "device_id": device_id,
             "device_name": device_name,
             "module_id": module_id,
@@ -717,6 +803,7 @@ def device_forecast(
                 "trend": trend,
                 "risk_level": risk_level,
                 "risk_reason": risk_reason,
+                "risk_ratio_pct": risk_ratio,
                 "historical_avg_daily_kwh": round(historical_avg_daily, 3),
             },
             "cost": {
@@ -730,6 +817,12 @@ def device_forecast(
             },
             "generated_at": now.isoformat(),
         }
+        if len(recent_data) < RECOMMENDED_READINGS_FOR_ACCURACY:
+            response["warning"] = (
+                "Limited historical data for this device ({} readings). "
+                "Predictions may be less accurate. More data over the next 24–48 hours will improve reliability."
+            ).format(len(recent_data))
+        return response
 
     except HTTPException:
         raise
@@ -819,19 +912,30 @@ def device_comparison():
                 daily_prev = _aggregate_daily(prev_data, prev_start, 7, is_historical=True)
                 last_week_total = sum(d["actual_kwh"] for d in daily_prev)
 
-                # Run forecast
-                df = pd.DataFrame(recent_data).sort_values("received_at")
-                all_predictions = _run_7day_lstm_forecast(df, lstm_service, location)
-
-                # Compute totals
+                # Run forecast: prefer behavioral profile (same logic as device-forecast)
                 weekly_kwh = 0.0
-                for day_offset in range(7):
-                    start_h = day_offset * 24
-                    end_h = min(start_h + 24, len(all_predictions))
-                    day_powers = all_predictions[start_h:end_h]
-                    if day_powers:
-                        avg_pw = sum(day_powers) / len(day_powers)
-                        weekly_kwh += avg_pw * len(day_powers) / 1000.0
+                try:
+                    profile_service = BehavioralProfileService()
+                    profile = profile_service.build_profile(device_id, hours_back=168)
+                    if profile and (profile.get("hourly_profile") or []):
+                        daily_fc, weekly_kwh = _forecast_from_behavioral_profile(profile, now)
+                        if daily_fc and len(daily_fc) == 7 and weekly_kwh > 0:
+                            pass  # use behavioral forecast
+                        else:
+                            weekly_kwh = 0.0  # fall through to LSTM
+                except Exception:
+                    pass
+
+                if weekly_kwh <= 0 and lstm_service is not None:
+                    df = pd.DataFrame(recent_data).sort_values("received_at")
+                    all_predictions = _run_7day_lstm_forecast(df, lstm_service, location)
+                    for day_offset in range(7):
+                        start_h = day_offset * 24
+                        end_h = min(start_h + 24, len(all_predictions))
+                        day_powers = all_predictions[start_h:end_h]
+                        if day_powers:
+                            avg_pw = sum(day_powers) / len(day_powers)
+                            weekly_kwh += avg_pw * len(day_powers) / 1000.0
 
                 # Comparison
                 if last_week_total > 0:
