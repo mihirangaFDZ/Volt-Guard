@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from bson.objectid import ObjectId
 from database import analytics_col, energy_col, devices_col, energy_advice_history_col
 from app.services.current_energy_recommendation_model import CurrentEnergyRecommendationModel
-from utils.jwt_handler import get_current_user_optional
+from utils.jwt_handler import get_current_user, get_current_user_optional
 from app.models.analytics_model import (
     Recommendation,
     RecommendationSeverity,

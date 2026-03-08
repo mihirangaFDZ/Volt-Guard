@@ -1,10 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import devices, energy, prediction, anomalies, user_routes, analytics, zones, faults, behavioral_profiles,optimization,model_evaluation, analytics, zones, faults, behavioral_profiles, chatbot as chatbot_routes, dashboard
+from routes import (
+    devices,
+    energy,
+    prediction,
+    anomalies,
+    user_routes,
+    analytics,
+    zones,
+    faults,
+    behavioral_profiles,
+    optimization,
+    model_evaluation,
+    dashboard,
+    ml_training,
+)
+from routes import chatbot as chatbot_routes
 from routes.auth_routes import router as auth_router
 from routes.devices import esp32_router
-from routes import ml_training
-
 
 import os
 

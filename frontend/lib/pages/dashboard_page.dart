@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:fl_chart/fl_chart.dart';
@@ -18,6 +19,12 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
+class _LiveState {
+  final Map<String, dynamic>? data;
+  final Set<String> highlightKeys;
+  _LiveState({this.data, this.highlightKeys = const {}});
+}
+
 class _DashboardPageState extends State<DashboardPage> {
   bool _isLoading = true;
   String? _error;
@@ -32,16 +39,96 @@ class _DashboardPageState extends State<DashboardPage> {
   String? _selectedDeviceId;
   bool _isGeneratingReport = false;
 
+  // Live data: only these sections rebuild when this notifier updates (no full page refresh)
+  final ValueNotifier<_LiveState> _liveNotifier = ValueNotifier<_LiveState>(_LiveState(data: null));
+  Timer? _highlightClearTimer;
+
   // Chart & savings state
   String _chartPeriod = 'day';
   bool _isChartLoading = false;
   Map<String, dynamic> _chartData = {};
   Map<String, dynamic> _savingsData = {};
+  DateTime? _lastUpdated;
+  static const Duration _liveUpdateInterval = Duration(seconds: 5);
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _loadDashboard();
+    _refreshTimer = Timer.periodic(_liveUpdateInterval, (_) {
+      if (mounted && !_isLoading) {
+        _loadLiveData();
+        _loadChartData(silent: true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _highlightClearTimer?.cancel();
+    _liveNotifier.dispose();
+    super.dispose();
+  }
+
+  Set<String> _computeLiveChangedKeys(Map<String, dynamic>? oldData, Map<String, dynamic> newData) {
+    final keys = <String>{};
+    if (oldData == null) return keys;
+    final oldEnergy = oldData['today_energy'] as Map<String, dynamic>? ?? {};
+    final newEnergy = newData['today_energy'] as Map<String, dynamic>? ?? {};
+    final oldBill = oldData['total_bill'] as Map<String, dynamic>?;
+    final newBill = newData['total_bill'] as Map<String, dynamic>?;
+    if ((oldEnergy['total_kwh'] as num?)?.toDouble() != (newEnergy['total_kwh'] as num?)?.toDouble()) keys.add('total_kwh');
+    if ((oldEnergy['avg_power_w'] as num?)?.toDouble() != (newEnergy['avg_power_w'] as num?)?.toDouble()) keys.add('avg_power_w');
+    if ((oldEnergy['readings_count'] as num?)?.toInt() != (newEnergy['readings_count'] as num?)?.toInt()) keys.add('readings_count');
+    if ((oldBill?['total_bill_lkr'] as num?)?.toDouble() != (newBill?['total_bill_lkr'] as num?)?.toDouble()) keys.add('total_bill_lkr');
+    final oldDevices = oldData['devices'] as List<dynamic>? ?? [];
+    final newDevices = newData['devices'] as List<dynamic>? ?? [];
+    for (int i = 0; i < newDevices.length; i++) {
+      final nd = newDevices[i] as Map<String, dynamic>;
+      final id = nd['device_id'] as String? ?? '';
+      final newPower = (nd['current_power_w'] as num?)?.toDouble() ?? 0.0;
+      double oldPower = 0.0;
+      if (i < oldDevices.length) {
+        final od = oldDevices[i] as Map<String, dynamic>;
+        if (od['device_id'] == id) oldPower = (od['current_power_w'] as num?)?.toDouble() ?? 0.0;
+      }
+      if (oldPower != newPower) keys.add('device:$id:power');
+    }
+    final oldTop = oldData['top_anomaly_device'] as Map<String, dynamic>?;
+    final newTop = newData['top_anomaly_device'] as Map<String, dynamic>?;
+    if (oldTop != null && newTop != null) {
+      if ((oldTop['current_power_w'] as num?)?.toDouble() != (newTop['current_power_w'] as num?)?.toDouble()) {
+        keys.add('top_anomaly_device');
+      }
+    } else if (oldTop != newTop) {
+      keys.add('top_anomaly_device');
+    }
+    return keys;
+  }
+
+  /// Live update: only update notifier so just live sections rebuild; highlight changed values.
+  Future<void> _loadLiveData() async {
+    try {
+      final data = await DashboardService.getLive();
+      if (!mounted) return;
+      _highlightClearTimer?.cancel();
+      final prev = _liveNotifier.value.data;
+      final newPayload = <String, dynamic>{
+        'today_energy': data['today_energy'] as Map<String, dynamic>? ?? {},
+        'total_bill': data['total_bill'] as Map<String, dynamic>?,
+        'devices': data['devices'] as List<dynamic>? ?? [],
+        'top_anomaly_device': data['top_anomaly_device'] as Map<String, dynamic>?,
+        '_lastUpdated': DateTime.now(),
+      };
+      final highlightKeys = _computeLiveChangedKeys(prev, newPayload);
+      _liveNotifier.value = _LiveState(data: newPayload, highlightKeys: highlightKeys);
+      _highlightClearTimer = Timer(const Duration(milliseconds: 2200), () {
+        if (!mounted) return;
+        _liveNotifier.value = _LiveState(data: _liveNotifier.value.data, highlightKeys: {});
+      });
+    } catch (_) {}
   }
 
   Future<void> _loadDashboard() async {
@@ -51,16 +138,31 @@ class _DashboardPageState extends State<DashboardPage> {
     });
     try {
       final data = await DashboardService.getSummary();
+      final devices = data['devices'] as List<dynamic>? ?? [];
       setState(() {
         _todayEnergy = data['today_energy'] as Map<String, dynamic>? ?? {};
         _totalBill = data['total_bill'] as Map<String, dynamic>?;
         _prediction = data['prediction'] as Map<String, dynamic>? ?? {};
         _anomalies = data['anomalies'] as List<dynamic>? ?? [];
         _recommendations = data['recommendations'] as List<dynamic>? ?? [];
-        _devices = data['devices'] as List<dynamic>? ?? [];
+        _devices = devices;
         _topDevice = data['top_anomaly_device'] as Map<String, dynamic>?;
+        _lastUpdated = DateTime.now();
         _isLoading = false;
+        if (_selectedDeviceId == null && devices.isNotEmpty) {
+          final first = devices.first as Map<String, dynamic>;
+          _selectedDeviceId = first['device_id'] as String?;
+        }
       });
+      _liveNotifier.value = _LiveState(
+        data: {
+          'today_energy': _todayEnergy,
+          'total_bill': _totalBill,
+          'devices': _devices,
+          'top_anomaly_device': _topDevice,
+          '_lastUpdated': _lastUpdated,
+        },
+      );
       _loadChartData();
     } catch (e) {
       setState(() {
@@ -70,20 +172,23 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  Future<void> _loadChartData() async {
-    setState(() => _isChartLoading = true);
+  /// [silent] true when refreshing from live timer: no loading spinner, chart still updates with real data.
+  Future<void> _loadChartData({bool silent = false}) async {
+    if (!silent) setState(() => _isChartLoading = true);
     try {
       final results = await Future.wait([
         DashboardService.getEnergyChart(_chartPeriod),
         DashboardService.getSavings(_chartPeriod),
       ]);
+      if (!mounted) return;
       setState(() {
         _chartData = results[0];
         _savingsData = results[1];
         _isChartLoading = false;
       });
     } catch (_) {
-      setState(() => _isChartLoading = false);
+      if (!mounted) return;
+      if (!silent) setState(() => _isChartLoading = false);
     }
   }
 
@@ -192,20 +297,53 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     return RefreshIndicator(
-      onRefresh: _loadDashboard,
+      onRefresh: _loadLiveData,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildSectionTitle(context, 'Today\'s Energy'),
-            const SizedBox(height: 12),
-            _buildTodayEnergyCard(context),
-            const SizedBox(height: 24),
-            _buildSectionTitle(context, 'Tomorrow\'s Prediction'),
-            const SizedBox(height: 12),
-            _buildTomorrowPredictionCard(context),
+            RepaintBoundary(
+              child: ValueListenableBuilder<_LiveState>(
+                valueListenable: _liveNotifier,
+                builder: (context, live, _) {
+                  final lastUpdated = live.data != null && live.data!['_lastUpdated'] != null
+                      ? live.data!['_lastUpdated'] as DateTime
+                      : _lastUpdated;
+                  final todayEnergy = live.data?['today_energy'] as Map<String, dynamic>?;
+                  final totalBill = live.data?['total_bill'] as Map<String, dynamic>?;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (lastUpdated != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              Icon(Icons.update, size: 14, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Live data • Last updated ${_formatLastUpdated(lastUpdated)}',
+                                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      _buildSectionTitle(context, 'Today\'s Energy'),
+                      const SizedBox(height: 12),
+                      _buildTodayEnergyCard(
+                        context,
+                        todayEnergy: todayEnergy,
+                        totalBill: totalBill,
+                        highlightKeys: live.highlightKeys,
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
             const SizedBox(height: 24),
             _buildSectionTitle(context, 'Active Anomalies'),
             const SizedBox(height: 12),
@@ -215,30 +353,85 @@ class _DashboardPageState extends State<DashboardPage> {
             const SizedBox(height: 12),
             _buildEnergyChartSection(context),
             const SizedBox(height: 24),
-            _buildSectionTitle(context, 'Energy Savings'),
-            const SizedBox(height: 12),
-            _buildSavingsCard(context),
-            const SizedBox(height: 24),
             _buildSectionTitle(context, 'Device Power Distribution'),
             const SizedBox(height: 12),
-            _buildDeviceDistributionChart(context),
-            const SizedBox(height: 24),
-            _buildSectionTitle(context, 'Recommendations'),
-            const SizedBox(height: 12),
-            _buildRecommendationsCard(context),
+            RepaintBoundary(
+              child: ValueListenableBuilder<_LiveState>(
+                valueListenable: _liveNotifier,
+                builder: (context, live, _) => _buildDeviceDistributionChart(
+                  context,
+                  devices: live.data?['devices'] as List<dynamic>?,
+                  highlightKeys: live.highlightKeys,
+                ),
+              ),
+            ),
             const SizedBox(height: 24),
             _buildSectionTitle(context, 'Real-Time Device Usage'),
             const SizedBox(height: 12),
-            _buildDeviceUsageList(context),
-            if (_topDevice != null) ...[
-              const SizedBox(height: 24),
-              _buildSectionTitle(context, 'Device Behavior Comparison'),
-              const SizedBox(height: 12),
-              _buildDeviceBehaviorCard(context),
-            ],
+            RepaintBoundary(
+              child: ValueListenableBuilder<_LiveState>(
+                valueListenable: _liveNotifier,
+                builder: (context, live, _) => _buildDeviceUsageList(
+                  context,
+                  devices: live.data?['devices'] as List<dynamic>?,
+                  highlightKeys: live.highlightKeys,
+                ),
+              ),
+            ),
+            RepaintBoundary(
+              child: ValueListenableBuilder<_LiveState>(
+                valueListenable: _liveNotifier,
+                builder: (context, live, _) {
+                  final top = live.data?['top_anomaly_device'] as Map<String, dynamic>? ?? _topDevice;
+                  if (top == null) return const SizedBox.shrink();
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(height: 24),
+                      _buildSectionTitle(context, 'Device Behavior Comparison'),
+                      const SizedBox(height: 12),
+                      _buildDeviceBehaviorCard(
+                        context,
+                        topDevice: top,
+                        highlightKeys: live.highlightKeys,
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
           ],
         ),
       ),
+    );
+  }
+
+  // ── Highlight when value changes (live update) ─────────────────────────
+
+  Widget _highlightableValue({
+    required BuildContext context,
+    required String highlightKey,
+    required Set<String> highlightKeys,
+    required Widget child,
+  }) {
+    final isHighlight = highlightKeys.contains(highlightKey);
+    if (!isHighlight) return child;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 1.0, end: 0.0),
+      duration: const Duration(milliseconds: 2000),
+      curve: Curves.easeOut,
+      builder: (context, value, child) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.green.withOpacity(0.15 * value),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          child: child,
+        );
+      },
+      child: child,
     );
   }
 
@@ -251,6 +444,14 @@ class _DashboardPageState extends State<DashboardPage> {
             fontWeight: FontWeight.bold,
           ),
     );
+  }
+
+  String _formatLastUpdated(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   String _formatPower(double watts) {
@@ -521,15 +722,22 @@ class _DashboardPageState extends State<DashboardPage> {
 
   // ── Today's Energy Card ──────────────────────────────────────────────
 
-  Widget _buildTodayEnergyCard(BuildContext context) {
-    final totalKwh = (_todayEnergy['total_kwh'] as num?)?.toDouble() ?? 0.0;
-    // Use backend saved total bill when available (from bills table); fallback to local tariff
-    final cost = (_totalBill != null && _totalBill!['total_bill_lkr'] != null)
-        ? (_totalBill!['total_bill_lkr'] as num).toDouble()
+  Widget _buildTodayEnergyCard(
+    BuildContext context, {
+    Map<String, dynamic>? todayEnergy,
+    Map<String, dynamic>? totalBill,
+    Set<String> highlightKeys = const {},
+  }) {
+    final te = todayEnergy ?? _todayEnergy;
+    final tb = totalBill ?? _totalBill;
+    final totalKwh = (te['total_kwh'] as num?)?.toDouble() ?? 0.0;
+    final cost = (tb != null && tb['total_bill_lkr'] != null)
+        ? (tb['total_bill_lkr'] as num).toDouble()
         : _calculateTariffCostLkr(totalKwh, billingDays: 1);
-    final peakHourUtc = _todayEnergy['peak_hour'] as String? ?? 'N/A';
+    final peakHourUtc = te['peak_hour'] as String? ?? 'N/A';
     final peakHour = _convertUtcHourRangeToSriLanka(peakHourUtc);
-    final avgPower = (_todayEnergy['avg_power_w'] as num?)?.toDouble() ?? 0.0;
+    final avgPower = (te['avg_power_w'] as num?)?.toDouble() ?? 0.0;
+    final readingsCount = (te['readings_count'] as num?)?.toInt() ?? 0;
     final billFormula = _simpleTariffCalculation(totalKwh, billingDays: 1);
 
     return Card(
@@ -555,12 +763,33 @@ class _DashboardPageState extends State<DashboardPage> {
                             .withOpacity(0.6),
                       ),
                     ),
+                    if (readingsCount > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: _highlightableValue(
+                          context: context,
+                          highlightKey: 'readings_count',
+                          highlightKeys: highlightKeys,
+                          child: Text(
+                            'From database • $readingsCount readings',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context).colorScheme.primary.withOpacity(0.8),
+                            ),
+                          ),
+                        ),
+                      ),
                     const SizedBox(height: 4),
-                    Text(
-                      '${totalKwh.toStringAsFixed(2)} kWh',
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
+                    _highlightableValue(
+                      context: context,
+                      highlightKey: 'total_kwh',
+                      highlightKeys: highlightKeys,
+                      child: Text(
+                        '${totalKwh.toStringAsFixed(2)} kWh',
+                        style: const TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -585,11 +814,16 @@ class _DashboardPageState extends State<DashboardPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _buildQuickStat(
-                  context,
-                  'Estimated Cost',
-                  'Rs. ${cost.toStringAsFixed(2)}',
-                  Colors.green,
+                _highlightableValue(
+                  context: context,
+                  highlightKey: 'total_bill_lkr',
+                  highlightKeys: highlightKeys,
+                  child: _buildQuickStat(
+                    context,
+                    'Estimated Cost',
+                    'Rs. ${cost.toStringAsFixed(2)}',
+                    Colors.green,
+                  ),
                 ),
                 Container(
                   height: 40,
@@ -610,11 +844,16 @@ class _DashboardPageState extends State<DashboardPage> {
                   width: 1,
                   color: Theme.of(context).colorScheme.outlineVariant,
                 ),
-                _buildQuickStat(
-                  context,
-                  'Avg. Power',
-                  _formatPower(avgPower),
-                  Colors.purple,
+                _highlightableValue(
+                  context: context,
+                  highlightKey: 'avg_power_w',
+                  highlightKeys: highlightKeys,
+                  child: _buildQuickStat(
+                    context,
+                    'Avg. Power',
+                    _formatPower(avgPower),
+                    Colors.purple,
+                  ),
                 ),
               ],
             ),
@@ -1264,7 +1503,16 @@ class _DashboardPageState extends State<DashboardPage> {
     if (points.isEmpty) {
       return const SizedBox(
         height: 200,
-        child: Center(child: Text('No data available for this period.')),
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'No consumption data for this period. Data comes from your energy readings. Pull to refresh.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13),
+            ),
+          ),
+        ),
       );
     }
 
@@ -1536,6 +1784,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     final hasSavings = savedKwh > 0;
     final gaugeColor = hasSavings ? Colors.green : Colors.orange;
+    final noBaseline = baselineKwh <= 0;
 
     return Card(
       elevation: 2,
@@ -1543,7 +1792,16 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (noBaseline)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Baseline is computed from registered devices. Add devices with rated power to see savings vs actual consumption.',
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+                ),
+              ),
             // Radial gauge + money saved
             Row(
               children: [
@@ -1780,9 +2038,14 @@ class _DashboardPageState extends State<DashboardPage> {
     Color(0xFF795548), // brown
   ];
 
-  Widget _buildDeviceDistributionChart(BuildContext context) {
+  Widget _buildDeviceDistributionChart(
+    BuildContext context, {
+    List<dynamic>? devices,
+    Set<String> highlightKeys = const {},
+  }) {
+    final devs = devices ?? _devices;
     // Filter devices with power > 0
-    final activeDevices = _devices
+    final activeDevices = devs
         .map((d) => d as Map<String, dynamic>)
         .where((d) => ((d['current_power_w'] as num?)?.toDouble() ?? 0.0) > 0)
         .toList();
@@ -1791,11 +2054,19 @@ class _DashboardPageState extends State<DashboardPage> {
       return Card(
         elevation: 2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: const Padding(
-          padding: EdgeInsets.all(20),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
           child: SizedBox(
             height: 80,
-            child: Center(child: Text('No active devices to display.')),
+            child: Center(
+              child: Text(
+                devs.isEmpty
+                    ? 'No devices registered. Add devices to see power distribution.'
+                    : 'No active devices right now. Distribution updates from live device usage.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7)),
+              ),
+            ),
           ),
         ),
       );
@@ -1882,10 +2153,12 @@ class _DashboardPageState extends State<DashboardPage> {
                   activeDevices.length > 5 ? 5 : activeDevices.length,
                   (i) {
                     final d = activeDevices[i];
+                    final id = d['device_id'] as String? ?? '';
                     final name = d['device_name'] as String? ?? 'Unknown';
                     final power =
                         (d['current_power_w'] as num?)?.toDouble() ?? 0.0;
                     final color = _donutColors[i % _donutColors.length];
+                    final hKey = 'device:$id:power';
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
                       child: Row(
@@ -1906,15 +2179,20 @@ class _DashboardPageState extends State<DashboardPage> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          Text(
-                            _formatPower(power),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withOpacity(0.7),
+                          _highlightableValue(
+                            context: context,
+                            highlightKey: hKey,
+                            highlightKeys: highlightKeys,
+                            child: Text(
+                              _formatPower(power),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withOpacity(0.7),
+                              ),
                             ),
                           ),
                         ],
@@ -2047,8 +2325,13 @@ class _DashboardPageState extends State<DashboardPage> {
 
   // ── Real-Time Device Usage ───────────────────────────────────────────
 
-  Widget _buildDeviceUsageList(BuildContext context) {
-    if (_devices.isEmpty) {
+  Widget _buildDeviceUsageList(
+    BuildContext context, {
+    List<dynamic>? devices,
+    Set<String> highlightKeys = const {},
+  }) {
+    final devs = devices ?? _devices;
+    if (devs.isEmpty) {
       return Card(
         elevation: 1,
         child: Padding(
@@ -2073,7 +2356,7 @@ class _DashboardPageState extends State<DashboardPage> {
     // Find selected device map (or null)
     Map<String, dynamic>? selected;
     if (_selectedDeviceId != null) {
-      for (final d in _devices) {
+      for (final d in devs) {
         final map = d as Map<String, dynamic>;
         if (map['device_id'] == _selectedDeviceId) {
           selected = map;
@@ -2095,7 +2378,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 isExpanded: true,
                 hint: const Text('Select a device'),
                 icon: const Icon(Icons.arrow_drop_down),
-                items: _devices.map<DropdownMenuItem<String>>((d) {
+                items: devs.map<DropdownMenuItem<String>>((d) {
                   final map = d as Map<String, dynamic>;
                   final id = map['device_id'] as String? ?? '';
                   final name = map['device_name'] as String? ?? 'Unknown';
@@ -2144,17 +2427,22 @@ class _DashboardPageState extends State<DashboardPage> {
         // Selected device detail card
         if (selected != null) ...[
           const SizedBox(height: 12),
-          _buildDeviceUsageItem(
-            context,
-            selected['device_name'] as String? ?? 'Unknown',
-            _formatPower(
-                (selected['current_power_w'] as num?)?.toDouble() ?? 0.0),
-            _deviceIcon(selected['device_type'] as String? ?? ''),
-            _deviceColor(selected['device_type'] as String? ?? ''),
-            (selected['usage_percentage'] as num?)?.toDouble() ?? 0.0,
-            selected['status'] as String? ?? 'Off',
-            selected['rated_power_watts'] as int? ?? 0,
-            selected['location'] as String? ?? '',
+          _highlightableValue(
+            context: context,
+            highlightKey: 'device:${selected['device_id']}:power',
+            highlightKeys: highlightKeys,
+            child: _buildDeviceUsageItem(
+              context,
+              selected['device_name'] as String? ?? 'Unknown',
+              _formatPower(
+                  (selected['current_power_w'] as num?)?.toDouble() ?? 0.0),
+              _deviceIcon(selected['device_type'] as String? ?? ''),
+              _deviceColor(selected['device_type'] as String? ?? ''),
+              (selected['usage_percentage'] as num?)?.toDouble() ?? 0.0,
+              selected['status'] as String? ?? 'Off',
+              selected['rated_power_watts'] as int? ?? 0,
+              selected['location'] as String? ?? '',
+            ),
           ),
         ],
       ],
@@ -2286,15 +2574,42 @@ class _DashboardPageState extends State<DashboardPage> {
 
   // ── Device Behavior Comparison ───────────────────────────────────────
 
-  Widget _buildDeviceBehaviorCard(BuildContext context) {
-    if (_topDevice == null) return const SizedBox.shrink();
+  Widget _buildDeviceBehaviorCard(
+    BuildContext context, {
+    Map<String, dynamic>? topDevice,
+    Set<String> highlightKeys = const {},
+  }) {
+    final top = topDevice ?? _topDevice;
+    if (top == null) {
+      final hasDevices = _devices.isNotEmpty;
+      return Card(
+        elevation: 2,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Icon(Icons.compare_arrows, color: Theme.of(context).colorScheme.outline, size: 28),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  hasDevices
+                      ? 'Device behavior comparison will appear here when devices report usage. Data is from your connected devices.'
+                      : 'Add devices and assign modules to see rated vs current power comparison.',
+                  style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
-    final deviceName = _topDevice!['device_name'] as String? ?? 'Device';
-    final ratedW = (_topDevice!['rated_power_w'] as num?)?.toDouble() ?? 0.0;
+    final deviceName = top['device_name'] as String? ?? 'Device';
+    final ratedW = (top['rated_power_w'] as num?)?.toDouble() ?? 0.0;
     final currentW =
-        (_topDevice!['current_power_w'] as num?)?.toDouble() ?? 0.0;
+        (top['current_power_w'] as num?)?.toDouble() ?? 0.0;
     final diffPct =
-        (_topDevice!['difference_percent'] as num?)?.toDouble() ?? 0.0;
+        (top['difference_percent'] as num?)?.toDouble() ?? 0.0;
 
     final isOverCapacity = currentW > ratedW;
     final diffColor = isOverCapacity ? Colors.red : Colors.green;
@@ -2333,12 +2648,17 @@ class _DashboardPageState extends State<DashboardPage> {
                   width: 1,
                   color: Theme.of(context).colorScheme.outlineVariant,
                 ),
-                _buildBehaviorColumn(
-                  context,
-                  'Current',
-                  _formatPower(currentW),
-                  isOverCapacity ? Colors.red : Colors.blue,
-                  Icons.trending_up,
+                _highlightableValue(
+                  context: context,
+                  highlightKey: 'top_anomaly_device',
+                  highlightKeys: highlightKeys,
+                  child: _buildBehaviorColumn(
+                    context,
+                    'Current',
+                    _formatPower(currentW),
+                    isOverCapacity ? Colors.red : Colors.blue,
+                    Icons.trending_up,
+                  ),
                 ),
                 Container(
                   height: 80,

@@ -86,6 +86,9 @@ def _kwh_to_lkr(kwh: float, period_days: float) -> float:
 # ── Timestamp helpers ───────────────────────────────────────────────
 
 def _parse_ts(raw) -> Optional[datetime]:
+    """Parse timestamp from various DB formats: datetime, ISO string, $date dict, Unix seconds/ms."""
+    if raw is None:
+        return None
     if isinstance(raw, datetime):
         return raw
     if isinstance(raw, str):
@@ -93,11 +96,29 @@ def _parse_ts(raw) -> Optional[datetime]:
             return datetime.fromisoformat(raw.replace("Z", "+00:00"))
         except Exception:
             return None
+    if isinstance(raw, dict) and "$date" in raw:
+        d = raw["$date"]
+        if isinstance(d, datetime):
+            return d
+        if isinstance(d, str):
+            try:
+                return datetime.fromisoformat(d.replace("Z", "+00:00"))
+            except Exception:
+                return None
+    if isinstance(raw, (int, float)):
+        try:
+            secs = float(raw)
+            if secs > 1e12:
+                secs /= 1000.0
+            return datetime.utcfromtimestamp(secs)
+        except (ValueError, OSError):
+            return None
     return None
 
 
 def _get_timestamp(doc: dict) -> Optional[datetime]:
-    for field in ("received_at", "receivedAt", "timestamp", "created_at"):
+    """Extract first available timestamp from a document (any common field name)."""
+    for field in ("received_at", "receivedAt", "timestamp", "created_at", "time", "date"):
         val = doc.get(field)
         if val is not None:
             parsed = _parse_ts(val)
@@ -106,11 +127,23 @@ def _get_timestamp(doc: dict) -> Optional[datetime]:
     return None
 
 
+def _doc_has_timestamp_in_range(doc: dict, start: datetime) -> bool:
+    """True if document has any timestamp >= start."""
+    ts = _get_timestamp(doc)
+    return ts is not None and ts >= start
+
+
 def _extract_current_a(doc: dict) -> float:
+    """Extract current in Amperes from energy reading (current_a, current_ma, rms_a, or power_w)."""
     if isinstance(doc.get("current_a"), (int, float)):
         return float(doc["current_a"])
     if isinstance(doc.get("current_ma"), (int, float)):
         return float(doc["current_ma"]) / 1000.0
+    if isinstance(doc.get("rms_a"), (int, float)):
+        return float(doc["rms_a"])
+    voltage = float(doc.get("voltage") or VOLTAGE) if isinstance(doc.get("voltage"), (int, float)) else VOLTAGE
+    if isinstance(doc.get("power_w"), (int, float)) and float(doc["power_w"]) != 0 and voltage > 0:
+        return float(doc["power_w"]) / voltage
     return 0.0
 
 
@@ -159,6 +192,10 @@ def _compute_today_energy(readings: List[dict]) -> dict:
 
     points.sort(key=lambda x: x["ts"])
     kwh = _integrate_kwh(points)
+    if kwh == 0.0 and len(points) == 1:
+        # Single reading: estimate kWh for 1 hour so we display real data
+        avg_power_w_single = points[0]["power_w"]
+        kwh = (avg_power_w_single * 1.0) / 1000.0  # 1 hour
     avg_power_w = sum(p["power_w"] for p in points) / len(points)
 
     peak_hour = "N/A"
@@ -202,15 +239,33 @@ def _period_range(period: str):
     return start, 1, "hour"
 
 
-def _query_readings_since(start: datetime, limit: int = 10000) -> List[dict]:
+def _query_readings_since(start: datetime, limit: int = 10000, sort_newest_first: bool = False) -> List[dict]:
+    """
+    Fetch energy readings from DB with timestamp >= start.
+    Tries MongoDB date query first; if no results, falls back to fetching recent docs
+    and filtering in Python (handles string dates or different field names).
+    If sort_newest_first=True, returns newest readings first (so limit keeps most recent); used for live today total.
+    """
+    # Primary: query by date on any of the common timestamp fields
     query = {
         "$or": [
             {"received_at": {"$gte": start}},
             {"receivedAt": {"$gte": start}},
             {"timestamp": {"$gte": start}},
+            {"created_at": {"$gte": start}},
         ]
     }
-    return list(energy_col.find(query, {"_id": 0}).limit(limit))
+    cursor = energy_col.find(query, {"_id": 0})
+    if sort_newest_first:
+        cursor = cursor.sort("_id", -1)
+    readings = list(cursor.limit(limit))
+    if readings:
+        return readings
+    # Fallback: fetch most recent documents and filter in Python (handles string dates / type mismatch)
+    cursor = energy_col.find({}, {"_id": 0}).sort("_id", -1).limit(limit * 2)
+    all_recent = list(cursor)
+    filtered = [r for r in all_recent if _doc_has_timestamp_in_range(r, start)]
+    return filtered[:limit]
 
 
 def _bucket_key(ts: datetime, bucket_type: str) -> str:
@@ -307,6 +362,88 @@ def _summary_fallback(date_str: str) -> dict:
     }
 
 
+def _get_live_data(date_str: str, today_start: datetime):
+    """
+    Compute today_energy, total_bill, devices (with current usage), top_anomaly_device.
+    Used by /summary and /live so live updates don't need full summary.
+    Uses sort_newest_first so the 5000 limit keeps the most recent readings and new ones are included.
+    """
+    today_readings = _query_readings_since(today_start, limit=5000, sort_newest_first=True)
+    today_energy = _compute_today_energy(today_readings)
+    total_bill = _upsert_daily_bill(
+        date_str,
+        today_energy["total_kwh"],
+        today_energy["estimated_cost_lkr"],
+        today_energy.get("readings_count", 0),
+    )
+    devices = list(devices_col.find({}, {"_id": 0}))
+    device_usage = []
+    for d in devices:
+        module_id = d.get("module_id")
+        location = d.get("location")
+        current_a = 0.0
+        latest = None
+        if module_id:
+            latest = energy_col.find_one(
+                {"module": module_id}, {"_id": 0},
+                sort=[("received_at", -1), ("receivedAt", -1), ("timestamp", -1), ("_id", -1)],
+            )
+            if latest is None:
+                latest = energy_col.find_one(
+                    {"module_id": module_id}, {"_id": 0},
+                    sort=[("received_at", -1), ("timestamp", -1), ("_id", -1)],
+                )
+        if latest is None and location:
+            latest = energy_col.find_one(
+                {"location": location}, {"_id": 0},
+                sort=[("received_at", -1), ("receivedAt", -1), ("timestamp", -1), ("_id", -1)],
+            )
+        if latest:
+            current_a = _extract_current_a(latest)
+        current_power_w = current_a * VOLTAGE
+        rated = d.get("rated_power_watts", 0)
+        usage_pct = min((current_power_w / rated) if rated > 0 else 0.0, 1.0)
+        if current_power_w > rated * 0.7 and rated > 0:
+            status = "High"
+        elif current_power_w > rated * 0.3 and rated > 0:
+            status = "Medium"
+        elif current_power_w > 0:
+            status = "Normal"
+        else:
+            status = "Off"
+        device_usage.append({
+            "device_id": d.get("device_id"),
+            "device_name": d.get("device_name"),
+            "device_type": d.get("device_type"),
+            "location": d.get("location"),
+            "rated_power_watts": rated,
+            "current_power_w": round(current_power_w, 1),
+            "current_a": round(current_a, 4),
+            "relay_state": d.get("relay_state", "OFF"),
+            "usage_percentage": round(usage_pct, 2),
+            "status": status,
+        })
+    device_usage.sort(key=lambda x: x["current_power_w"], reverse=True)
+    top_device = None
+    active_devices = [d for d in device_usage if d["current_power_w"] > 0]
+    if active_devices:
+        top = max(active_devices, key=lambda d: d["usage_percentage"])
+        rated_w = top["rated_power_watts"]
+        current_w = top["current_power_w"]
+        top_device = {
+            "device_name": top["device_name"],
+            "rated_power_w": rated_w,
+            "current_power_w": current_w,
+            "difference_percent": round(((current_w / rated_w) * 100), 0) if rated_w > 0 else 0,
+        }
+    return {
+        "today_energy": today_energy,
+        "total_bill": total_bill,
+        "devices": device_usage,
+        "top_anomaly_device": top_device,
+    }
+
+
 @router.get("/summary")
 def get_dashboard_summary():
     """Aggregated dashboard data for the mobile app."""
@@ -314,17 +451,11 @@ def get_dashboard_summary():
     date_str = today_start.strftime("%Y-%m-%d")
 
     try:
-        # --- 1. Today's Energy ---
-        today_readings = _query_readings_since(today_start, limit=5000)
-        today_energy = _compute_today_energy(today_readings)
-
-        # --- 1b. Save total bill to database (daily record) ---
-        total_bill = _upsert_daily_bill(
-            date_str,
-            today_energy["total_kwh"],
-            today_energy["estimated_cost_lkr"],
-            today_energy.get("readings_count", 0),
-        )
+        live = _get_live_data(date_str, today_start)
+        today_energy = live["today_energy"]
+        total_bill = live["total_bill"]
+        device_usage = live["devices"]
+        top_device = live["top_anomaly_device"]
 
         # --- 2. Predictions ---
         predictions = list(prediction_col.find({"prediction_type": "daily"}, {"_id": 0}))
@@ -363,60 +494,6 @@ def get_dashboard_summary():
         )
         recommendations = [r.dict() for r in _derive_recommendations(analytics_docs)]
 
-        # --- 5. Devices with current usage ---
-        devices = list(devices_col.find({}, {"_id": 0}))
-        device_usage = []
-        for d in devices:
-            module_id = d.get("module_id")
-            current_a = 0.0
-            if module_id:
-                latest = energy_col.find_one(
-                    {"module": module_id}, {"_id": 0},
-                    sort=[("received_at", -1), ("_id", -1)],
-                )
-                if latest:
-                    current_a = _extract_current_a(latest)
-            current_power_w = current_a * VOLTAGE
-            rated = d.get("rated_power_watts", 0)
-            usage_pct = min((current_power_w / rated) if rated > 0 else 0.0, 1.0)
-
-            if current_power_w > rated * 0.7 and rated > 0:
-                status = "High"
-            elif current_power_w > rated * 0.3 and rated > 0:
-                status = "Medium"
-            elif current_power_w > 0:
-                status = "Normal"
-            else:
-                status = "Off"
-
-            device_usage.append({
-                "device_id": d.get("device_id"),
-                "device_name": d.get("device_name"),
-                "device_type": d.get("device_type"),
-                "location": d.get("location"),
-                "rated_power_watts": rated,
-                "current_power_w": round(current_power_w, 1),
-                "current_a": round(current_a, 4),
-                "relay_state": d.get("relay_state", "OFF"),
-                "usage_percentage": round(usage_pct, 2),
-                "status": status,
-            })
-        device_usage.sort(key=lambda x: x["current_power_w"], reverse=True)
-
-        # --- 6. Top device for behaviour comparison ---
-        top_device = None
-        active_devices = [d for d in device_usage if d["current_power_w"] > 0]
-        if active_devices:
-            top = max(active_devices, key=lambda d: d["usage_percentage"])
-            rated_w = top["rated_power_watts"]
-            current_w = top["current_power_w"]
-            top_device = {
-                "device_name": top["device_name"],
-                "rated_power_w": rated_w,
-                "current_power_w": current_w,
-                "difference_percent": round(((current_w / rated_w) * 100), 0) if rated_w > 0 else 0,
-            }
-
         return {
             "today_energy": today_energy,
             "total_bill": total_bill,
@@ -430,6 +507,38 @@ def get_dashboard_summary():
         return _summary_fallback(date_str)
 
 
+@router.get("/live")
+def get_dashboard_live():
+    """
+    Lightweight live data: today_energy, total_bill, devices (with current usage), top_anomaly_device.
+    Poll this for live updates without reloading charts/anomalies/recommendations.
+    """
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    date_str = today_start.strftime("%Y-%m-%d")
+    try:
+        return _get_live_data(date_str, today_start)
+    except (NetworkTimeout, ServerSelectionTimeoutError):
+        return {
+            "today_energy": {
+                "total_kwh": 0.0,
+                "estimated_cost_lkr": 0.0,
+                "avg_power_w": 0.0,
+                "peak_hour": "N/A",
+                "readings_count": 0,
+            },
+            "total_bill": {
+                "date": date_str,
+                "period_type": "daily",
+                "total_kwh": 0.0,
+                "total_bill_lkr": 0.0,
+                "readings_count": 0,
+                "saved_at": datetime.utcnow().isoformat(),
+            },
+            "devices": [],
+            "top_anomaly_device": None,
+        }
+
+
 # ── Energy Chart Endpoint ───────────────────────────────────────────
 
 @router.get("/energy-chart")
@@ -438,10 +547,11 @@ def get_energy_chart(
 ):
     """
     Time-series energy consumption data for charting.
-    Returns bucketed actual kWh and the baseline comparison.
+    Returns bucketed actual kWh from real readings and the baseline comparison.
+    Uses newest-first so the chart includes the latest consumption data.
     """
     start, days, bucket_type = _period_range(period)
-    raw_readings = _query_readings_since(start)
+    raw_readings = _query_readings_since(start, limit=15000, sort_newest_first=True)
 
     # Parse into (ts, current_a) and assign to buckets
     buckets: Dict[str, List[dict]] = {}
@@ -464,15 +574,23 @@ def get_energy_chart(
             all_keys.append(d.strftime("%Y-%m-%d"))
             d += timedelta(days=1)
 
-    # Calculate kWh per bucket
+    # Calculate kWh per bucket (use integration when ≥2 points; else estimate from single reading)
     daily_baseline = _daily_baseline_kwh()
     chart_points = []
+    bucket_hours = 1.0 / 24.0 if bucket_type == "hour" else 1.0
     for key in all_keys:
         pts = buckets.get(key, [])
         pts.sort(key=lambda p: p["ts"])
-        actual_kwh = _integrate_kwh(pts) if len(pts) >= 2 else 0.0
+        if len(pts) >= 2:
+            actual_kwh = _integrate_kwh(pts)
+        elif len(pts) == 1:
+            # Single reading: estimate kWh = power * bucket_duration (assumes constant over bucket)
+            avg_a = pts[0]["current"]
+            power_w = avg_a * VOLTAGE
+            actual_kwh = (power_w * bucket_hours * 3600) / 3600.0 / 1000.0  # kWh
+        else:
+            actual_kwh = 0.0
 
-        # Baseline per bucket
         if bucket_type == "hour":
             baseline_kwh = daily_baseline / 24.0
         else:
