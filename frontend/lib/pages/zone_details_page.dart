@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:volt_guard/services/zones_service.dart';
+import 'package:volt_guard/services/energy_service.dart';
 
 import 'zones_page.dart';
 
@@ -14,12 +17,17 @@ class ZoneDetailsPage extends StatefulWidget {
 }
 
 class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
+  static const double _lkrPerKwh = 12.0;
   late List<DeviceData> devices;
+  Map<String, Map<String, dynamic>> _energyByLocation = {};
+  double _zoneLiveCurrent = 0.0;
+  double _zoneEnergyKwh = 0.0;
   late List<ScheduleRuleData> schedules;
   final ZonesService _zonesService = ZonesService();
   bool _loadingDevices = false;
   bool _savingDevice = false;
   int _selectedTabIndex = 0;
+  Timer? _autoRefreshTimer;
 
   @override
   void initState() {
@@ -27,24 +35,100 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
     devices = [];
     schedules = _getMockSchedules();
     _loadDevices();
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 60), (_) => _loadDevices());
+  }
+
+  @override
+  void dispose() {
+    _autoRefreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadDevices() async {
     setState(() => _loadingDevices = true);
     try {
       final list = await _zonesService.fetchDevicesForLocation(widget.zone.name);
-      devices = list
-          .map(
-            (d) => DeviceData(
-              id: d['device_id']?.toString() ?? 'unknown',
-              name: d['device_name']?.toString() ?? 'Unknown Device',
-              type: d['device_type']?.toString() ?? 'Unknown',
-              power: (d['rated_power_watts'] is num) ? (d['rated_power_watts'] as num).toInt() : 0,
-              status: 'on',
-              energyToday: 0,
-            ),
-          )
-          .toList();
+
+      String _norm(String? v) => v?.toLowerCase().trim() ?? '';
+      final zoneKey = _norm(widget.zone.name);
+      final moduleKey = _norm(widget.zone.type); // zone.type currently stores module string
+
+      // Fetch latest per-location for live current
+      final latestByLoc = await EnergyService.getLatestByLocation();
+      _energyByLocation = {};
+      for (final e in latestByLoc) {
+        if (e is! Map<String, dynamic>) continue;
+        final key = _norm(e['location']?.toString());
+        if (key.isEmpty) continue;
+        _energyByLocation.putIfAbsent(key, () => e as Map<String, dynamic>);
+      }
+
+      // Fetch aggregated energy usage (kWh) per location from backend
+      final usageResp = await EnergyService.getEnergyUsage(limit: 5000);
+      final usageList = (usageResp['usage'] is List) ? usageResp['usage'] as List : <dynamic>[];
+      final Map<String, double> energyKwhByLoc = {};
+      for (final u in usageList) {
+        if (u is! Map<String, dynamic>) continue;
+        final key = _norm(u['location']?.toString());
+        final val = (u['energy_kwh'] is num) ? (u['energy_kwh'] as num).toDouble() : 0.0;
+        if (key.isNotEmpty) energyKwhByLoc[key] = val;
+      }
+
+      // Fetch history for this location to compute energy
+      List<dynamic> energyList = await EnergyService.getEnergyReadings(location: widget.zone.name, limit: 200);
+      if (energyList.isEmpty) {
+        energyList = await EnergyService.getEnergyReadings(limit: 200);
+      }
+
+      devices = list.map((d) {
+        final deviceId = d['device_id']?.toString() ?? 'unknown';
+        final deviceName = d['device_name']?.toString() ?? 'Unknown Device';
+        final deviceType = d['device_type']?.toString() ?? 'Unknown';
+        final power = (d['rated_power_watts'] is num) ? (d['rated_power_watts'] as num).toInt() : 0;
+
+        // Match energy by normalized location/module/device hints
+        Map<String, dynamic>? energy = _energyByLocation[zoneKey];
+        energy ??= _energyByLocation[moduleKey];
+        energy ??= _energyByLocation[_norm(deviceId)];
+        energy ??= _energyByLocation[_norm(deviceName)];
+        // If still null, fallback to newest reading
+        energy ??= energyList.isNotEmpty && energyList.first is Map<String, dynamic>
+            ? energyList.first as Map<String, dynamic>
+            : null;
+
+        double currentA = (energy != null && energy['current_a'] is num) ? (energy['current_a'] as num).toDouble() : 0.0;
+        final voltage = (energy != null && energy['voltage'] is num) ? (energy['voltage'] as num).toDouble() : 230.0;
+        final powerW = currentA * voltage;
+        // Use backend aggregated energy if available for this location/device
+        final energyToday = energyKwhByLoc[zoneKey] ?? energyKwhByLoc[moduleKey] ??
+          energyKwhByLoc[_norm(deviceId)] ?? energyKwhByLoc[_norm(deviceName)] ?? 0.0;
+        final lastSeen = energy != null ? (energy['received_at'] ?? energy['receivedAt'] ?? energy['timestamp']) : null;
+        final parsedTs = lastSeen is String ? DateTime.tryParse(lastSeen) : (lastSeen is DateTime ? lastSeen : null);
+        final isFresh = parsedTs != null ? DateTime.now().difference(parsedTs).inMinutes <= 5 : false;
+        if (!isFresh) {
+          currentA = 0.0; // Do not show outdated current values
+        }
+
+        return DeviceData(
+          id: deviceId,
+          name: deviceName,
+          type: deviceType,
+          power: power,
+          status: 'on',
+          energyToday: energyToday,
+          liveCurrentA: currentA,
+          lastEnergyTs: lastSeen?.toString(),
+        );
+      }).toList();
+
+      // Zone energy is the sum of device-level aggregated kWh; fallback to integrated history if empty
+      _zoneEnergyKwh = devices.fold(0.0, (sum, d) => sum + d.energyToday);
+      if (_zoneEnergyKwh == 0 && energyList.isNotEmpty) {
+        _zoneEnergyKwh = _computeEnergyKwh(energyList);
+      }
+
+      // Sum live current for the zone
+      _zoneLiveCurrent = devices.fold(0.0, (sum, d) => sum + (d.liveCurrentA ?? 0.0));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -54,6 +138,52 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
     } finally {
       if (mounted) setState(() => _loadingDevices = false);
     }
+  }
+
+  double _computeEnergyKwh(List<dynamic> readings) {
+    if (readings.isEmpty) return 0.0;
+
+    // Extract (ts, currentA, voltage) tuples
+    final points = <Map<String, dynamic>>[];
+    for (final r in readings) {
+      if (r is! Map<String, dynamic>) continue;
+      final tsRaw = r['received_at'] ?? r['receivedAt'] ?? r['timestamp'] ?? r['created_at'];
+      final ts = tsRaw is String ? DateTime.tryParse(tsRaw) : (tsRaw is DateTime ? tsRaw : null);
+      if (ts == null) continue;
+      double current = 0.0;
+      if (r['current_a'] is num) {
+        current = (r['current_a'] as num).toDouble();
+      } else if (r['current_ma'] is num) {
+        current = (r['current_ma'] as num).toDouble() / 1000.0;
+      }
+      final voltage = (r['voltage'] is num) ? (r['voltage'] as num).toDouble() : 230.0;
+      points.add({'ts': ts, 'current': current, 'voltage': voltage});
+    }
+
+    if (points.length < 2) {
+      // Not enough points to integrate; approximate from last reading over a short window
+      final p = points.isNotEmpty ? points.first : null;
+      if (p == null) return 0.0;
+      return (p['current'] * p['voltage'] / 1000.0) * (10 / 3600.0); // assume 10s window
+    }
+
+    // Sort ascending by time
+    points.sort((a, b) => (a['ts'] as DateTime).compareTo(b['ts'] as DateTime));
+
+    double kwh = 0.0;
+    for (var i = 1; i < points.length; i++) {
+      final prev = points[i - 1];
+      final cur = points[i];
+      final dtSeconds = (cur['ts'] as DateTime).difference(prev['ts'] as DateTime).inSeconds;
+      if (dtSeconds <= 0) continue;
+      // Cap huge gaps to reduce overestimation on stale data
+      final cappedDt = dtSeconds > 900 ? 900 : dtSeconds;
+      final avgCurrent = ((prev['current'] as double) + (cur['current'] as double)) / 2.0;
+      final voltage = (cur['voltage'] as double); // assume stable voltage
+      final kwhChunk = (avgCurrent * voltage) * (cappedDt / 3600.0) / 1000.0;
+      kwh += kwhChunk;
+    }
+    return kwh;
   }
 
   List<ScheduleRuleData> _getMockSchedules() {
@@ -81,18 +211,23 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
     ];
   }
 
-  double get totalEnergy => devices.fold(0, (sum, d) => sum + d.energyToday);
-  double get estimatedCost => totalEnergy * 12; // Assuming ₹12 per kWh
+  double get totalEnergy => _zoneEnergyKwh;
+  double get estimatedCost => _zoneEnergyKwh * _lkrPerKwh; // LKR per kWh
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9F9),
+      backgroundColor: const Color(0xFF0B1220),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(widget.zone.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(widget.zone.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: _loadDevices,
+            icon: const Icon(Icons.refresh, color: Colors.white),
+          ),
           PopupMenuButton<String>(
             onSelected: (value) => _handleMenuAction(value),
             itemBuilder: (BuildContext context) => [
@@ -120,26 +255,32 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Zone Summary Card
-            _buildZoneSummaryCard(),
-            const SizedBox(height: 24),
-
-            // Today's Energy
-            _buildTodayEnergySection(),
-            const SizedBox(height: 24),
-
-            // Tab Navigation
-            _buildTabNavigation(),
-            const SizedBox(height: 16),
-
-            // Tab Content
-            _buildTabContent(),
-          ],
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF0B1220), Color(0xFF0F172A)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: RefreshIndicator(
+          onRefresh: _loadDevices,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildZoneSummaryCard(),
+                const SizedBox(height: 20),
+                _buildTodayEnergySection(),
+                const SizedBox(height: 20),
+                _buildTabNavigation(),
+                const SizedBox(height: 14),
+                _buildTabContent(),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -147,14 +288,17 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
 
   Widget _buildZoneSummaryCard() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF4A90E2), Color(0xFF2563EB)],
+          colors: [Color(0xFF1D4ED8), Color(0xFF0EA5E9)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(color: Color(0x331D4ED8), blurRadius: 18, offset: Offset(0, 12)),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -169,7 +313,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                     widget.zone.name,
                     style: const TextStyle(
                       fontSize: 20,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w900,
                       color: Colors.white,
                     ),
                   ),
@@ -177,17 +321,17 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                   Text(
                     "${widget.zone.type} • Floor ${widget.zone.floor}",
                     style: const TextStyle(
-                      fontSize: 14,
+                      fontSize: 13,
                       color: Colors.white70,
                     ),
                   ),
                 ],
               ),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.white.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Column(
                   children: [
@@ -215,12 +359,12 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                 value: "${(widget.zone.currentPower / 1000).toStringAsFixed(1)} kW",
               ),
               _buildSummaryItem(
-                icon: Icons.devices,
-                label: "Devices",
+                icon: Icons.devices_other,
+                label: "Devices On",
                 value: "${devices.where((d) => d.status == 'on').length}/${devices.length}",
               ),
               _buildSummaryItem(
-                icon: Icons.thermostat,
+                icon: Icons.visibility,
                 label: "Occupancy",
                 value: widget.zone.occupancy == "occupied" ? "Active" : "Empty",
               ),
@@ -238,8 +382,15 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
   }) {
     return Column(
       children: [
-        Icon(icon, color: Colors.white, size: 20),
-        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.16),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: Colors.white, size: 18),
+        ),
+        const SizedBox(height: 6),
         Text(
           label,
           style: const TextStyle(
@@ -247,12 +398,12 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
             color: Colors.white70,
           ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 4),
         Text(
           value,
           style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
             color: Colors.white,
           ),
         ),
@@ -265,65 +416,75 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          "Today's Energy Usage",
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          "Today's Energy",
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
         ),
         const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey[200]!),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              Column(
-                children: [
-                  const Icon(Icons.bolt, color: Color(0xFFFBBF24), size: 28),
-                  const SizedBox(height: 8),
-                  Text(
-                    "${totalEnergy.toStringAsFixed(2)} kWh",
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Energy Consumed",
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
+        Row(
+          children: [
+            Expanded(
+              child: _buildMiniStat(
+                icon: Icons.bolt,
+                color: const Color(0xFFFBBF24),
+                title: "Cost (today)",
+                value: "LKR ${estimatedCost.toStringAsFixed(0)}",
               ),
-              Container(
-                height: 50,
-                width: 1,
-                color: Colors.grey[200],
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _buildMiniStat(
+                icon: Icons.attach_money,
+                color: const Color(0xFF22C55E),
+                title: "Est. Monthly",
+                value: "LKR ${(estimatedCost * 30).toStringAsFixed(0)}",
               ),
-              Column(
-                children: [
-                  const Icon(Icons.attach_money, color: Color(0xFF00C853), size: 28),
-                  const SizedBox(height: 8),
-                  Text(
-                    "₹${estimatedCost.toStringAsFixed(0)}",
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Estimated Cost",
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _buildMiniStat(
+                icon: Icons.electric_bolt,
+                color: const Color(0xFF38BDF8),
+                title: "Live Current",
+                value: "${_zoneLiveCurrent.toStringAsFixed(2)} A",
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ],
+    );
+  }
+
+  Widget _buildMiniStat({required IconData icon, required Color color, required String title, required String value}) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.18),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 12, color: Colors.white70),
+          ),
+        ],
+      ),
     );
   }
 
@@ -347,18 +508,18 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF4A90E2) : Colors.white,
+            color: isSelected ? const Color(0xFF2563EB) : Colors.white.withOpacity(0.06),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: isSelected ? const Color(0xFF4A90E2) : Colors.grey[200]!,
+              color: isSelected ? const Color(0xFF2563EB) : Colors.white24,
             ),
           ),
           child: Text(
             label,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: isSelected ? Colors.white : Colors.black87,
+              fontWeight: FontWeight.w700,
+              color: isSelected ? Colors.white : Colors.white70,
             ),
           ),
         ),
@@ -388,7 +549,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
           children: [
             const Text(
               "Connected Devices",
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
             ),
             ElevatedButton.icon(
               onPressed: () => _showAddDeviceDialog(),
@@ -423,25 +584,36 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
 
   Widget _buildDeviceCard(DeviceData device) {
     final isOn = device.status == "on";
+    final tsText = device.lastEnergyTs ?? 'Unknown';
+    final ts = device.lastEnergyTs != null ? DateTime.tryParse(device.lastEnergyTs!) : null;
+    final isStale = ts != null ? DateTime.now().difference(ts).inMinutes > 5 : true;
+    final staleLabel = isStale ? ' (stale)' : '';
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+        boxShadow: const [
+          BoxShadow(color: Color(0x220F172A), blurRadius: 12, offset: Offset(0, 10)),
+        ],
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: isOn ? const Color(0xFFE8F5E9) : Colors.grey[100],
+              color: isOn ? const Color(0xFF22C55E).withOpacity(0.15) : Colors.white.withOpacity(0.06),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
               Icons.devices,
-              color: isOn ? const Color(0xFF4CAF50) : Colors.grey[600],
+              color: isOn ? const Color(0xFF22C55E) : Colors.white70,
             ),
           ),
           const SizedBox(width: 12),
@@ -451,13 +623,27 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
               children: [
                 Text(
                   device.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   "${device.type} • ${device.power}W",
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  style: const TextStyle(fontSize: 12, color: Colors.white70),
                 ),
+                const SizedBox(height: 4),
+                if (device.liveCurrentA != null)
+                  Text(
+                    "Live: ${device.liveCurrentA!.toStringAsFixed(2)} A",
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF60A5FA)),
+                  ),
+                if (device.lastEnergyTs != null)
+                  Text(
+                    "Updated: $tsText$staleLabel",
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isStale ? Colors.red[300] : Colors.white60,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -468,8 +654,8 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: isOn
-                      ? const Color(0xFFE8F5E9)
-                      : const Color(0xFFF5F5F5),
+                      ? const Color(0xFF22C55E).withOpacity(0.15)
+                      : Colors.white.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -478,17 +664,24 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
                     color: isOn
-                        ? const Color(0xFF2E7D32)
-                        : Colors.grey[600],
+                        ? const Color(0xFF22C55E)
+                        : Colors.white70,
                   ),
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                "${device.energyToday.toStringAsFixed(1)} kWh",
+                "LKR ${(device.energyToday * _lkrPerKwh).toStringAsFixed(2)} est.",
                 style: TextStyle(
                   fontSize: 11,
-                  color: Colors.grey[600],
+                  color: Colors.white70,
+                ),
+              ),
+              Text(
+                "~LKR ${(device.energyToday * 30 * _lkrPerKwh).toStringAsFixed(0)}/mo",
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.white54,
                 ),
               ),
             ],
@@ -503,7 +696,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
             ),
             child: Icon(
               Icons.power_settings_new,
-              color: isOn ? const Color(0xFF4CAF50) : Colors.grey[400],
+              color: isOn ? const Color(0xFF22C55E) : Colors.white38,
               size: 20,
             ),
           ),
@@ -666,7 +859,7 @@ class _ZoneDetailsPageState extends State<ZoneDetailsPage> {
                 "${widget.zone.monthlyConsumption.toStringAsFixed(0)} kWh",
               ),
               const Divider(),
-              _buildAnalyticRow("Monthly Cost", "₹${widget.zone.monthlyCost.toStringAsFixed(0)}"),
+              _buildAnalyticRow("Monthly Cost", "LKR ${widget.zone.monthlyCost.toStringAsFixed(0)}"),
               const Divider(),
               if (widget.zone.monthlyBudget != null) ...[
                 _buildAnalyticRow(
@@ -912,6 +1105,8 @@ class DeviceData {
   final int power;
   final String status;
   final double energyToday;
+  final double? liveCurrentA;
+  final String? lastEnergyTs;
 
   DeviceData({
     required this.id,
@@ -920,6 +1115,8 @@ class DeviceData {
     required this.power,
     required this.status,
     required this.energyToday,
+    this.liveCurrentA,
+    this.lastEnergyTs,
   });
 }
 

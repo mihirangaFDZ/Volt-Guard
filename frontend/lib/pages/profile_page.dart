@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:volt_guard/providers/theme_provider.dart';
 import 'package:volt_guard/screens/login_screen.dart';
 import 'package:volt_guard/services/auth_service.dart';
 import 'package:volt_guard/services/user_service.dart';
@@ -261,7 +263,12 @@ class _ProfilePageState extends State<ProfilePage> {
                       const SizedBox(height: 4),
                       Text(
                         (user?['email'] ?? '').toString(),
-                        style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                        style: TextStyle(
+                            fontSize: 16,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withOpacity(0.6)),
                       ),
                       const SizedBox(height: 10),
                       Wrap(
@@ -324,6 +331,8 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
             ),
             const SizedBox(height: 12),
+            _buildAppearanceCard(context),
+            const SizedBox(height: 8),
             _buildMenuCard(
               context,
               'Energy Goals',
@@ -403,7 +412,7 @@ class _ProfilePageState extends State<ProfilePage> {
               'Version 1.0.0',
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.grey[600],
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
               ),
             ),
             const SizedBox(height: 24),
@@ -425,7 +434,7 @@ class _ProfilePageState extends State<ProfilePage> {
         title: Text(title),
         trailing: Icon(
           Icons.chevron_right,
-          color: Colors.grey[400],
+          color: Theme.of(context).colorScheme.outlineVariant,
         ),
         onTap: () {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -433,6 +442,81 @@ class _ProfilePageState extends State<ProfilePage> {
           );
         },
       ),
+    );
+  }
+
+  // ─── Appearance / Theme ────────────────────────────────────────────────────
+
+  Widget _buildAppearanceCard(BuildContext context) {
+    final themeProvider = context.watch<ThemeProvider>();
+    final currentMode = themeProvider.themeMode;
+    return Card(
+      elevation: 1,
+      child: ListTile(
+        leading: Icon(
+          ThemeProvider.iconFor(currentMode),
+          color: Theme.of(context).colorScheme.primary,
+        ),
+        title: const Text('Appearance'),
+        subtitle: Text(
+          ThemeProvider.labelFor(currentMode),
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+          ),
+        ),
+        trailing: Icon(
+          Icons.chevron_right,
+          color: Theme.of(context).colorScheme.outlineVariant,
+        ),
+        onTap: () => _showThemePicker(context, themeProvider),
+      ),
+    );
+  }
+
+  void _showThemePicker(BuildContext context, ThemeProvider themeProvider) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: const EdgeInsets.only(left: 8, right: 8, bottom: 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text(
+                      'Appearance',
+                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                  ),
+                  for (final mode in ThemeMode.values)
+                    RadioListTile<ThemeMode>(
+                      value: mode,
+                      groupValue: themeProvider.themeMode,
+                      secondary: Icon(ThemeProvider.iconFor(mode)),
+                      title: Text(ThemeProvider.labelFor(mode)),
+                      onChanged: (selected) async {
+                        if (selected != null) {
+                          await themeProvider.setThemeMode(selected);
+                          setModalState(() {});
+                        }
+                      },
+                    ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

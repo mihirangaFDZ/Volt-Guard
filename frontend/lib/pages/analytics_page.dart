@@ -35,7 +35,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   List<String> _availableLocations = [];
   List<String> _availableModules = [];
   bool _filtersLoading = false;
-  
+
   // Occupancy stats
   Map<String, dynamic>? _occupancyStats;
   
@@ -52,21 +52,14 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   Future<void> _loadFilters() async {
     try {
-      setState(() {
-        _filtersLoading = true;
-      });
       final filters = await _analyticsService.fetchAvailableFilters();
       if (!mounted) return;
       setState(() {
         _availableLocations = filters['locations'] ?? [];
         _availableModules = filters['modules'] ?? [];
-        _filtersLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _filtersLoading = false;
-      });
       // Don't show error for filters, just continue without them
     }
   }
@@ -83,7 +76,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         location: _selectedLocation,
         module: _selectedModule,
       );
-      
+
       // Fetch occupancy stats
       Map<String, dynamic>? occupancyStats;
       try {
@@ -95,7 +88,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       } catch (e) {
         // Ignore errors for occupancy stats
       }
-      
+
       _DerivedStats? stats;
       if (data.isNotEmpty) {
         stats = _deriveStats(data);
@@ -196,6 +189,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -203,7 +197,11 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         title: const Text('Analytics & Recommendations'),
       ),
       body: RefreshIndicator(
-        onRefresh: _loadReadings,
+        onRefresh: () async {
+          await Future.wait([
+            _loadReadings(),
+          ]);
+        },
         child: _buildBody(),
       ),
     );
@@ -272,7 +270,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   }
 
   SensorReading _latestReading(List<SensorReading> readings) {
-    return readings.reduce((a, b) => a.receivedAt.isAfter(b.receivedAt) ? a : b);
+    return readings
+        .reduce((a, b) => a.receivedAt.isAfter(b.receivedAt) ? a : b);
   }
 
   Widget _errorCard(String message) {
@@ -292,7 +291,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                   const Text('Unable to load analytics',
                       style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
-                  Text(message, style: TextStyle(color: Colors.red[700], fontSize: 12)),
+                  Text(message,
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontSize: 12)),
                 ],
               ),
             ),
@@ -329,8 +331,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   }
 
   Widget _buildFilters() {
-    final bool hasActiveFilters = _selectedLocation != null || _selectedModule != null;
-    
+    final bool hasActiveFilters =
+        _selectedLocation != null || _selectedModule != null;
+
     return Card(
       elevation: 2,
       child: Padding(
@@ -359,7 +362,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                     icon: const Icon(Icons.clear, size: 18),
                     label: const Text('Clear'),
                     style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
@@ -373,7 +377,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               decoration: const InputDecoration(
                 labelText: 'Location',
                 border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 isDense: true,
               ),
               items: [
@@ -381,10 +386,12 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                   value: null,
                   child: Text('All Locations'),
                 ),
-                ..._availableLocations.map((location) => DropdownMenuItem<String>(
-                      value: location,
-                      child: Text(location, overflow: TextOverflow.ellipsis),
-                    )),
+                ..._availableLocations
+                    .map((location) => DropdownMenuItem<String>(
+                          value: location,
+                          child:
+                              Text(location, overflow: TextOverflow.ellipsis),
+                        )),
               ],
               onChanged: (value) {
                 setState(() {
@@ -400,7 +407,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               decoration: const InputDecoration(
                 labelText: 'Module ID',
                 border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 isDense: true,
               ),
               items: [
@@ -443,12 +451,18 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 const SizedBox(width: 8),
                 Text(
                   stats.isOccupied ? 'Occupied' : 'Vacant',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
                 Text(
                   'Last seen: ${_friendlyTime(latest.receivedAt)}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.6)),
                 ),
               ],
             ),
@@ -469,11 +483,12 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
+
   Widget _buildOccupancyStats() {
     if (_occupancyStats == null) {
       return const SizedBox.shrink();
     }
-    
+
     final stats = _occupancyStats!;
     final isOccupied = stats['is_currently_occupied'] as bool? ?? false;
     final totalReadings = stats['total_readings'] as int? ?? 0;
@@ -481,7 +496,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     final vacantCount = stats['vacant_count'] as int? ?? 0;
     final occupiedPercentage = stats['occupied_percentage'] as double? ?? 0.0;
     final vacantPercentage = stats['vacant_percentage'] as double? ?? 0.0;
-    
+
     return Card(
       elevation: 2,
       child: Padding(
@@ -502,15 +517,19 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 ),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isOccupied ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                    color: isOccupied
+                        ? Colors.green.withOpacity(0.1)
+                        : Colors.orange.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Text(
                     isOccupied ? 'Currently Occupied' : 'Currently Vacant',
                     style: TextStyle(
-                      color: isOccupied ? Colors.green[700] : Colors.orange[700],
+                      color:
+                          isOccupied ? Colors.green[700] : Colors.orange[700],
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
                     ),
@@ -546,8 +565,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 Expanded(
                   child: LinearProgressIndicator(
                     value: occupiedPercentage / 100,
-                    backgroundColor: Colors.grey[200],
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+                    backgroundColor:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
+                    valueColor:
+                        const AlwaysStoppedAnimation<Color>(Colors.green),
                     minHeight: 8,
                   ),
                 ),
@@ -555,8 +576,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 Expanded(
                   child: LinearProgressIndicator(
                     value: vacantPercentage / 100,
-                    backgroundColor: Colors.grey[200],
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                    backgroundColor:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
+                    valueColor:
+                        const AlwaysStoppedAnimation<Color>(Colors.orange),
                     minHeight: 8,
                   ),
                 ),
@@ -565,14 +588,17 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
             const SizedBox(height: 8),
             Text(
               'Based on last $totalReadings readings',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              style: TextStyle(
+                  fontSize: 12,
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
             ),
           ],
         ),
       ),
     );
   }
-  
+
   Widget _statTile(String label, String count, String percentage, Color color) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -585,7 +611,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         children: [
           Text(
             label,
-            style: TextStyle(fontSize: 12, color: Colors.grey[700], fontWeight: FontWeight.w600),
+            style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 4),
           Row(
@@ -594,12 +623,14 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
             children: [
               Text(
                 count,
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color),
+                style: TextStyle(
+                    fontSize: 24, fontWeight: FontWeight.bold, color: color),
               ),
               const SizedBox(width: 4),
               Text(
                 percentage,
-                style: TextStyle(fontSize: 14, color: color, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                    fontSize: 14, color: color, fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -620,27 +651,38 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               children: const [
                 Icon(Icons.thermostat, color: Colors.deepOrange),
                 SizedBox(width: 8),
-                Text('Comfort & Drift', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text('Comfort & Drift',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ],
             ),
             const SizedBox(height: 10),
             Row(
               children: [
-                _valueTile('Temp', '${stats.latestTemp.toStringAsFixed(1)}°C', stats.tempStatusColor),
+                _valueTile('Temp', '${stats.latestTemp.toStringAsFixed(1)}°C',
+                    stats.tempStatusColor),
                 const SizedBox(width: 10),
-                _valueTile('Humidity', '${stats.latestHumidity.toStringAsFixed(0)}%', stats.humidityStatusColor),
+                _valueTile(
+                    'Humidity',
+                    '${stats.latestHumidity.toStringAsFixed(0)}%',
+                    stats.humidityStatusColor),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(stats.comfortNote, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      Text(stats.comfortNote,
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 6),
                       LinearProgressIndicator(
                         value: stats.tempBandProgress,
                         minHeight: 8,
-                        backgroundColor: Colors.grey[200],
-                        valueColor: AlwaysStoppedAnimation<Color>(stats.tempStatusColor),
+                        backgroundColor: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                            stats.tempStatusColor),
                       ),
                     ],
                   ),
@@ -665,7 +707,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               children: const [
                 Icon(Icons.wifi_tethering, color: Colors.blueGrey),
                 SizedBox(width: 8),
-                Text('Sensor Health', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text('Sensor Health',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ],
             ),
             const SizedBox(height: 10),
@@ -673,9 +717,18 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               spacing: 12,
               runSpacing: 12,
               children: [
-                _healthTile('RSSI', '${latest.rssi ?? -80} dBm', stats.signalColor, stats.signalLabel),
-                _healthTile('Uptime', latest.uptime != null ? '${latest.uptime}s' : 'n/a', Colors.indigo, 'since boot'),
-                _healthTile('Heap', latest.heap != null ? '${latest.heap} B' : 'n/a', Colors.teal, 'free mem'),
+                _healthTile('RSSI', '${latest.rssi ?? -80} dBm',
+                    stats.signalColor, stats.signalLabel),
+                _healthTile(
+                    'Uptime',
+                    latest.uptime != null ? '${latest.uptime}s' : 'n/a',
+                    Colors.indigo,
+                    'since boot'),
+                _healthTile(
+                    'Heap',
+                    latest.heap != null ? '${latest.heap} B' : 'n/a',
+                    Colors.teal,
+                    'free mem'),
               ],
             ),
           ],
@@ -697,20 +750,36 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               children: const [
                 Icon(Icons.lightbulb, color: Colors.amber),
                 SizedBox(width: 8),
-                Text('Actionable Recommendations', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text('Actionable Recommendations',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ],
             ),
             const SizedBox(height: 12),
             if (recs.isEmpty)
               Text('No recommendations right now.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[700]))
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.7)))
             else
-              ...List.generate(recs.length, (index) => _recTile(recs[index], () => _handleRecAction(index))),
+              ...List.generate(
+                  recs.length,
+                  (index) =>
+                      _recTile(recs[index], () => _handleRecAction(index))),
             if (_history.isNotEmpty) ...[
               const SizedBox(height: 12),
-              Divider(color: Colors.grey[300]),
+              Divider(color: Theme.of(context).colorScheme.outlineVariant),
               const SizedBox(height: 8),
-              Text('History', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.grey[800])),
+              Text('History',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.8))),
               const SizedBox(height: 8),
               ..._history.take(5).map((entry) => _historyTile(entry)).toList(),
             ],
@@ -947,7 +1016,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               children: const [
                 Icon(Icons.list_alt, color: Colors.indigo),
                 SizedBox(width: 8),
-                Text('Recent Readings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text('Recent Readings',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ],
             ),
             const SizedBox(height: 12),
@@ -973,13 +1044,23 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 Text(item.rec.title,
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
-                      decoration: item.completed ? TextDecoration.lineThrough : TextDecoration.none,
+                      decoration: item.completed
+                          ? TextDecoration.lineThrough
+                          : TextDecoration.none,
                     )),
                 const SizedBox(height: 4),
                 Text(item.rec.detail,
                     style: TextStyle(
                       fontSize: 12,
-                      color: item.completed ? Colors.grey[500] : Colors.grey[700],
+                      color: item.completed
+                          ? Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(0.5)
+                          : Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(0.7),
                     )),
                 if (item.completed)
                   Padding(
@@ -988,7 +1069,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                       children: const [
                         Icon(Icons.check_circle, color: Colors.green, size: 16),
                         SizedBox(width: 6),
-                        Text('Completed', style: TextStyle(color: Colors.green, fontSize: 12)),
+                        Text('Completed',
+                            style:
+                                TextStyle(color: Colors.green, fontSize: 12)),
                       ],
                     ),
                   ),
@@ -1003,7 +1086,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
             ),
             onPressed: item.completed ? null : onPressed,
             child: Text(item.completed ? 'Done' : item.rec.cta,
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                style:
+                    const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -1023,12 +1107,23 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(item.rec.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(item.rec.title,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 2),
                 Text(item.rec.detail,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.7))),
                 Text(_friendlyTime(entry.completedAt),
-                    style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.6))),
               ],
             ),
           ),
@@ -1364,27 +1459,37 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         onTap: () => _showReadingDetails(reading),
         child: Row(
           children: [
-            Icon(occupied ? Icons.sensor_occupied : Icons.sensor_door, color: color),
+            Icon(occupied ? Icons.sensor_occupied : Icons.sensor_door,
+                color: color),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${reading.location} • ${_friendlyTime(reading.receivedAt)}',
+                  Text(
+                      '${reading.location} • ${_friendlyTime(reading.receivedAt)}',
                       style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 2),
                   Text(
-                    'Temp ${reading.temperature.toStringAsFixed(1)}°C, Hum ${reading.humidity.toStringAsFixed(0)}%, PIR ${reading.pir}, RCWL ${reading.rcwl}',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                    'Temp ${reading.temperature.toStringAsFixed(1)}\u00b0C, Hum ${reading.humidity.toStringAsFixed(0)}%, PIR ${reading.pir}, RCWL ${reading.rcwl}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.7)),
                   ),
                 ],
               ),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+              decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6)),
               child: Text(occupied ? 'Occupied' : 'Vacant',
-                  style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
+                  style: TextStyle(
+                      color: color, fontSize: 11, fontWeight: FontWeight.w700)),
             ),
           ],
         ),
@@ -1404,13 +1509,16 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('${reading.location} • ${reading.module}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
               Text('Seen ${_friendlyTime(reading.receivedAt)}'),
               const SizedBox(height: 12),
               Text('PIR: ${reading.pir}, RCWL: ${reading.rcwl}'),
-              Text('Temp: ${reading.temperature.toStringAsFixed(1)}°C, Hum: ${reading.humidity.toStringAsFixed(0)}%'),
-              Text('RSSI: ${reading.rssi ?? 'n/a'} dBm, Uptime: ${reading.uptime ?? 0}s'),
+              Text(
+                  'Temp: ${reading.temperature.toStringAsFixed(1)}°C, Hum: ${reading.humidity.toStringAsFixed(0)}%'),
+              Text(
+                  'RSSI: ${reading.rssi ?? 'n/a'} dBm, Uptime: ${reading.uptime ?? 0}s'),
               if (reading.heap != null) Text('Heap: ${reading.heap} B'),
               if (reading.ip != null) Text('IP: ${reading.ip}'),
               if (reading.mac != null) Text('MAC: ${reading.mac}'),
@@ -1425,8 +1533,11 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Widget _pill(String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(18)),
-      child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+      decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(18)),
+      child: Text(text,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
     );
   }
 
@@ -1434,13 +1545,23 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     return Container(
       width: 100,
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: color.withOpacity(0.08), borderRadius: BorderRadius.circular(8)),
+      decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(8)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withOpacity(0.7))),
           const SizedBox(height: 6),
-          Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.bold, color: color)),
         ],
       ),
     );
@@ -1450,15 +1571,31 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     return Container(
       width: 150,
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: color.withOpacity(0.08), borderRadius: BorderRadius.circular(8)),
+      decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(8)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withOpacity(0.7))),
           const SizedBox(height: 4),
-          Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.bold, color: color)),
           const SizedBox(height: 2),
-          Text(hint, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+          Text(hint,
+              style: TextStyle(
+                  fontSize: 10,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withOpacity(0.6))),
           if (label == 'IP' && value != 'n/a')
             Align(
               alignment: Alignment.centerRight,
@@ -1475,21 +1612,20 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   String _friendlyTime(DateTime time) {
     // Sri Lankan timezone (UTC+5:30)
     const Duration sriLankaOffset = Duration(hours: 5, minutes: 30);
-    
+
     // Convert current time to Sri Lankan time
     final DateTime nowSriLanka = DateTime.now().toUtc().add(sriLankaOffset);
-    
+
     // Ensure time is in Sri Lankan timezone (already converted in fromJson)
     // If time is UTC, convert it; otherwise assume it's already in Sri Lankan time
     DateTime timeSriLanka = time.isUtc ? time.add(sriLankaOffset) : time;
-    
+
     final Duration diff = nowSriLanka.difference(timeSriLanka);
     if (diff.inMinutes < 1) return 'just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
   }
-
 
   void _handleCopy(String value) {
     Clipboard.setData(ClipboardData(text: value));
@@ -1557,10 +1693,10 @@ class _Recommendation {
 }
 
 class _RecItem {
-  _RecItem({required this.rec, this.completed = false});
+  _RecItem({required this.rec});
 
   final _Recommendation rec;
-  bool completed;
+  bool completed = false;
 }
 
 class _CompletedEntry {
@@ -1571,16 +1707,24 @@ class _CompletedEntry {
 }
 
 _DerivedStats _deriveStats(List<SensorReading> readings) {
-  final List<SensorReading> sorted = List.of(readings)..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
+  final List<SensorReading> sorted = List.of(readings)
+    ..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
   final SensorReading latest = sorted.last;
 
-  final double avgTemp = sorted.map((r) => r.temperature).reduce((a, b) => a + b) / sorted.length;
-  final double avgHumidity = sorted.map((r) => r.humidity).reduce((a, b) => a + b) / sorted.length;
+  final double avgTemp =
+      sorted.map((r) => r.temperature).reduce((a, b) => a + b) / sorted.length;
+  final double avgHumidity =
+      sorted.map((r) => r.humidity).reduce((a, b) => a + b) / sorted.length;
 
-  final SensorReading lastOccupied = sorted.reversed.firstWhere((r) => r.occupied, orElse: () => latest);
+  final SensorReading lastOccupied =
+      sorted.reversed.firstWhere((r) => r.occupied, orElse: () => latest);
   final int vacancyMinutes = lastOccupied == latest
       ? 0
-      : latest.receivedAt.difference(lastOccupied.receivedAt).inMinutes.clamp(0, 1 << 16).toInt();
+      : latest.receivedAt
+          .difference(lastOccupied.receivedAt)
+          .inMinutes
+          .clamp(0, 1 << 16)
+          .toInt();
 
   final int rssi = latest.rssi ?? -80;
   final String signalLabel;
@@ -1596,7 +1740,8 @@ _DerivedStats _deriveStats(List<SensorReading> readings) {
     signalColor = Colors.red;
   }
 
-  final double tempBandProgress = (((latest.temperature - 20) / 10).clamp(0, 1)).toDouble();
+  final double tempBandProgress =
+      (((latest.temperature - 20) / 10).clamp(0, 1)).toDouble();
   final Color tempColor = latest.temperature > 30
       ? Colors.red
       : (latest.temperature >= 27 ? Colors.orange : Colors.green);
@@ -1625,4 +1770,41 @@ _DerivedStats _deriveStats(List<SensorReading> readings) {
   );
 }
 
-
+List<_Recommendation> _buildRecList(_DerivedStats stats) {
+  final List<_Recommendation> recs = [];
+  if (!stats.isOccupied &&
+      stats.latestTemp > 31 &&
+      stats.vacancyMinutes >= 30) {
+    recs.add(_Recommendation(
+      title: 'Turn off AC in vacant room',
+      detail:
+          'Vacant for ${stats.vacancyMinutes} min at ${stats.latestTemp.toStringAsFixed(1)}°C.',
+      cta: 'Send Alert',
+      color: Colors.red,
+      icon: Icons.ac_unit,
+    ));
+  }
+  recs.add(_Recommendation(
+    title: 'Align motion sensing',
+    detail:
+        'RCWL often 1 while PIR 0. Reposition sensor to reduce false motion.',
+    cta: 'Inspect',
+    color: Colors.indigo,
+    icon: Icons.sensors,
+  ));
+  recs.add(_Recommendation(
+    title: 'Check link quality',
+    detail: 'RSSI ${stats.signalLabel}. Move gateway or adjust antenna.',
+    cta: 'Check Link',
+    color: stats.signalColor,
+    icon: Icons.network_check,
+  ));
+  recs.add(_Recommendation(
+    title: 'Comfort guardrails',
+    detail: 'Keep 24-27°C occupied; allow 29-30°C when vacant to save energy.',
+    cta: 'Apply',
+    color: Colors.teal,
+    icon: Icons.rule,
+  ));
+  return recs;
+}

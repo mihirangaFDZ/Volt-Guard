@@ -1,10 +1,10 @@
 name: volt_guard
 description: Smart Energy Management System using IoT - Mobile Application
-publish_to: 'none'
+publish_to: "none"
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: ">=3.0.0 <4.0.0"
 
 dependencies:
   flutter:
@@ -24,7 +24,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  
+
   assets:
     - assets/images/
     - assets/fonts/
@@ -34,7 +34,7 @@ flutter_launcher_icons:
   ios: true
   image_path: "assets/images/icon.png"
   adaptive_icon_background: "#0D1A14"
-  adaptive_icon_foreground: "assets/images/icon_foreground.png"
+  adaptive_icon_foreground: "assets/images/icon.png"
   remove_alpha_ios: true
 
 flutter_native_splash:
