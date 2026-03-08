@@ -2048,17 +2048,34 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
+  /// Sri Lankan timezone (UTC+5:30). Used for Current Energy "Last seen".
+  static const Duration _sriLankaOffset = Duration(hours: 5, minutes: 30);
+
+  /// Formats [time] as clock time in Sri Lankan timezone (e.g. "8 Mar 2026, 9:18 PM").
+  String _formatTimeInSriLanka(DateTime time) {
+    final DateTime utc = time.isUtc
+        ? time
+        : DateTime.utc(
+            time.year, time.month, time.day, time.hour, time.minute,
+            time.second, time.millisecond,
+          );
+    final DateTime sl = utc.add(_sriLankaOffset);
+    final int h = sl.hour;
+    final int m = sl.minute;
+    final String ampm = h >= 12 ? 'PM' : 'AM';
+    final int h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+    const List<String> months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${sl.day} ${months[sl.month - 1]} ${sl.year}, '
+        '${h12.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')} $ampm';
+  }
+
   String _friendlyTime(DateTime time) {
-    // Sri Lankan timezone (UTC+5:30)
-    const Duration sriLankaOffset = Duration(hours: 5, minutes: 30);
-
-    // Convert current time to Sri Lankan time
-    final DateTime nowSriLanka = DateTime.now().toUtc().add(sriLankaOffset);
-
-    // Ensure time is in Sri Lankan timezone (already converted in fromJson)
-    // If time is UTC, convert it; otherwise assume it's already in Sri Lankan time
-    DateTime timeSriLanka = time.isUtc ? time.add(sriLankaOffset) : time;
-
+    final DateTime nowSriLanka = DateTime.now().toUtc().add(_sriLankaOffset);
+    final DateTime timeSriLanka =
+        time.isUtc ? time.add(_sriLankaOffset) : time;
     final Duration diff = nowSriLanka.difference(timeSriLanka);
     if (diff.inMinutes < 1) return 'just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
