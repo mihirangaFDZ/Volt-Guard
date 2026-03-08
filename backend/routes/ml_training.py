@@ -32,8 +32,16 @@ _training_status = {
     "training_error": None
 }
 
+
+def _get_models_dir() -> Path:
+    """Resolve models directory relative to backend root (works regardless of CWD)."""
+    backend_root = Path(__file__).resolve().parent.parent
+    return backend_root / "models"
+
+
 def train_models_background(hours_back: int = 48):
     """Background task to train all models"""
+    model_dir = str(_get_models_dir())
     try:
         _training_status["is_training"] = True
         _training_status["training_error"] = None
@@ -56,12 +64,12 @@ def train_models_background(hours_back: int = 48):
             numeric_features = [col for col in feature_cols if col in df.columns and col != 'power_w']
 
         # Train Isolation Forest (anomaly detection)
-        ml_service = EnergyMLService(model_dir='models')
+        ml_service = EnergyMLService(model_dir=model_dir)
         ml_service.train_anomaly_detector(df, numeric_features)
 
         # Train Autoencoder (anomaly detection)
         try:
-            autoencoder = AutoencoderAnomalyDetector(model_dir='models')
+            autoencoder = AutoencoderAnomalyDetector(model_dir=model_dir)
             autoencoder.train(
                 df, numeric_features,
                 contamination=0.1,
@@ -83,7 +91,7 @@ def train_models_background(hours_back: int = 48):
                 available_data = len(df)
                 seq_length = 12 if available_data < 100 else (24 if available_data < 500 else 48)
 
-                lstm = LSTMPredictor(model_dir='models', sequence_length=seq_length, prediction_horizon=1)
+                lstm = LSTMPredictor(model_dir=model_dir, sequence_length=seq_length, prediction_horizon=1)
                 lstm.train(
                     df,
                     target_col='power_w',
@@ -129,54 +137,62 @@ def train_models(
 @router.get("/status")
 def get_training_status():
     """
-    Get current training status and model information
+    Get current training status and model information.
+    Never returns 500 — model load failures are reported as loaded=False.
     """
+    model_dir = _get_models_dir()
+    models_exist = {
+        "anomaly_model": (model_dir / "anomaly_model.pkl").exists(),
+        "autoencoder_model": (model_dir / "autoencoder_model.h5").exists(),
+        "autoencoder_meta": (model_dir / "autoencoder_meta.pkl").exists(),
+        "lstm_model": (model_dir / "lstm_model.h5").exists(),
+        "lstm_scalers": (model_dir / "lstm_scalers.pkl").exists(),
+    }
+
+    ml_loaded = False
     try:
-        ml_service = EnergyMLService(model_dir='models')
+        ml_service = EnergyMLService(model_dir=str(model_dir))
         ml_loaded = ml_service.load_models()
+    except Exception:
+        pass
 
-        lstm_service = LSTMPredictor(model_dir='models')
+    lstm_loaded = False
+    try:
+        lstm_service = LSTMPredictor(model_dir=str(model_dir))
         lstm_loaded = lstm_service.load_model()
+    except Exception:
+        pass
 
-        ae_service = AutoencoderAnomalyDetector(model_dir='models')
+    ae_loaded = False
+    try:
+        ae_service = AutoencoderAnomalyDetector(model_dir=str(model_dir))
         ae_loaded = ae_service.load_model()
+    except Exception:
+        pass
 
-        # Check if model files exist
-        model_dir = Path('models')
-        models_exist = {
-            "anomaly_model": (model_dir / 'anomaly_model.pkl').exists(),
-            "autoencoder_model": (model_dir / 'autoencoder_model.h5').exists(),
-            "autoencoder_meta": (model_dir / 'autoencoder_meta.pkl').exists(),
-            "lstm_model": (model_dir / 'lstm_model.h5').exists(),
-            "lstm_scalers": (model_dir / 'lstm_scalers.pkl').exists()
-        }
-
-        return {
-            "is_training": _training_status["is_training"],
-            "last_training": _training_status["last_training"],
-            "training_error": _training_status["training_error"],
-            "models": {
-                "anomaly_isolation_forest": {
-                    "type": "Isolation Forest",
-                    "trained": models_exist["anomaly_model"],
-                    "loaded": ml_loaded
-                },
-                "anomaly_autoencoder": {
-                    "type": "Autoencoder Neural Network",
-                    "trained": models_exist["autoencoder_model"] and models_exist["autoencoder_meta"],
-                    "loaded": ae_loaded
-                },
-                "prediction_lstm": {
-                    "type": "LSTM Neural Network",
-                    "trained": models_exist["lstm_model"] and models_exist["lstm_scalers"],
-                    "loaded": lstm_loaded
-                }
+    return {
+        "is_training": _training_status["is_training"],
+        "last_training": _training_status["last_training"],
+        "training_error": _training_status["training_error"],
+        "models": {
+            "anomaly_isolation_forest": {
+                "type": "Isolation Forest",
+                "trained": models_exist["anomaly_model"],
+                "loaded": ml_loaded,
             },
-            "model_files_exist": models_exist
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error checking status: {str(e)}")
+            "anomaly_autoencoder": {
+                "type": "Autoencoder Neural Network",
+                "trained": models_exist["autoencoder_model"] and models_exist["autoencoder_meta"],
+                "loaded": ae_loaded,
+            },
+            "prediction_lstm": {
+                "type": "LSTM Neural Network",
+                "trained": models_exist["lstm_model"] and models_exist["lstm_scalers"],
+                "loaded": lstm_loaded,
+            },
+        },
+        "model_files_exist": models_exist,
+    }
 
 @router.get("/model-info")
 def get_model_info():
@@ -204,7 +220,7 @@ def get_model_info():
 
         # Try to load Autoencoder info
         try:
-            ae_service = AutoencoderAnomalyDetector(model_dir='models')
+            ae_service = AutoencoderAnomalyDetector(model_dir=model_dir)
             if ae_service.load_model():
                 info["anomaly_detection"]["autoencoder"] = {
                     "type": "Autoencoder Neural Network",
@@ -217,7 +233,7 @@ def get_model_info():
 
         # Try to load LSTM info
         try:
-            lstm_service = LSTMPredictor(model_dir='models')
+            lstm_service = LSTMPredictor(model_dir=model_dir)
             if lstm_service.load_model():
                 info["prediction"]["lstm"] = {
                     "type": "LSTM Neural Network",
