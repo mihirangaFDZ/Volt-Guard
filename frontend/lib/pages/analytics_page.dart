@@ -120,7 +120,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         deviceId: _selectedDeviceId,
       );
 
-      // Use new analytics endpoint for current energy data
+      // Use new analytics endpoint for curent energy data
       final energyStatsFuture = _analyticsService.fetchCurrentEnergyStats(
         limit: 120,
         location: _selectedLocation,
@@ -149,7 +149,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           ];
         }
       } catch (_) {
-        // Current energy data is optional for the environment tab.
+        // Curent energy data is optional for the environment tab.
       }
 
       _DerivedStats? stats;
@@ -307,7 +307,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           if (_selectedTab == _AnalyticsTab.environment)
             ..._buildEnvironmentAnalytics(hasActiveFilters)
           else
-            ..._buildCurrentEnergyAnalytics(hasActiveFilters),
+            ..._buildCurentEnergyAnalytics(hasActiveFilters),
         ],
       ),
     );
@@ -322,9 +322,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           label: Text('Environment'),
         ),
         ButtonSegment<_AnalyticsTab>(
-          value: _AnalyticsTab.currentEnergy,
+          value: _AnalyticsTab.curentEnergy,
           icon: Icon(Icons.electric_bolt),
-          label: Text('Current Energy'),
+          label: Text('Curent Energy'),
         ),
       ],
       selected: <_AnalyticsTab>{_selectedTab},
@@ -365,25 +365,25 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     ];
   }
 
-  List<Widget> _buildCurrentEnergyAnalytics(bool hasActiveFilters) {
+  List<Widget> _buildCurentEnergyAnalytics(bool hasActiveFilters) {
     if (_energyReadings.isEmpty) {
       return [
-        _currentEnergyEmptyState(hasActiveFilters: hasActiveFilters),
+        _curentEnergyEmptyState(hasActiveFilters: hasActiveFilters),
       ];
     }
 
-    final _CurrentEnergyStats stats = _deriveCurrentEnergyStats(
+    final _CurentEnergyStats stats = _deriveCurentEnergyStats(
       _energyReadings,
       usageResponse: _energyUsage,
       selectedLocation: _selectedLocation,
     );
 
     return [
-      _buildCurrentEnergyHeader(stats),
+      _buildCurentEnergyHeader(stats),
       const SizedBox(height: 16),
-      _buildCurrentEnergyMetrics(stats),
+      _buildCurentEnergyMetrics(stats),
       const SizedBox(height: 16),
-      _buildCurrentEnergyReadings(_energyReadings),
+      _buildCurentEnergyReadings(_energyReadings),
     ];
   }
 
@@ -473,7 +473,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _currentEnergyEmptyState({required bool hasActiveFilters}) {
+  Widget _curentEnergyEmptyState({required bool hasActiveFilters}) {
     return Card(
       elevation: 0,
       child: Padding(
@@ -488,8 +488,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 Expanded(
                   child: Text(
                     hasActiveFilters
-                        ? 'No current-energy readings found for the selected location/module.'
-                        : 'No current-energy readings yet. Wait for ESP32 energy data and refresh.',
+                        ? 'No curent-energy readings found for the selected location/module.'
+                        : 'No curent-energy readings yet. Wait for ESP32 energy data and refresh.',
                     style: const TextStyle(fontSize: 13),
                   ),
                 ),
@@ -519,7 +519,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _buildCurrentEnergyHeader(_CurrentEnergyStats stats) {
+  Widget _buildCurentEnergyHeader(_CurentEnergyStats stats) {
     return Card(
       elevation: 2,
       child: Padding(
@@ -532,7 +532,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 Icon(Icons.electric_bolt, color: stats.trendColor),
                 const SizedBox(width: 8),
                 const Text(
-                  'Current Energy Analysis',
+                  'Curent Energy Analysis',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
@@ -557,7 +557,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 if (stats.latest != null) ...[
                   _pill('${stats.latest!.location} • ${stats.latest!.module}'),
                   _pill('Sensor: ${stats.latest!.sensor}'),
-                  _pill('Type: ${stats.latest!.type ?? 'current'}'),
+                  _pill('Type: ${stats.latest!.type ?? 'curent'}'),
                 ],
                 _pill(
                     'Trend: ${stats.trendLabel} (${stats.deltaPercent.toStringAsFixed(1)}%)'),
@@ -569,7 +569,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _buildCurrentEnergyMetrics(_CurrentEnergyStats stats) {
+  Widget _buildCurentEnergyMetrics(_CurentEnergyStats stats) {
     return Card(
       elevation: 2,
       child: Padding(
@@ -582,7 +582,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 Icon(Icons.insights, color: Colors.green),
                 SizedBox(width: 8),
                 Text(
-                  'Current Metrics',
+                  'Curent Metrics',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
               ],
@@ -593,17 +593,17 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               runSpacing: 12,
               children: [
                 _energyMetricTile(
-                    'Latest Current',
-                    '${stats.latestCurrentA.toStringAsFixed(3)} A',
+                    'Latest Curent',
+                    '${stats.latestCurentA.toStringAsFixed(3)} A',
                     Colors.blue),
                 _energyMetricTile(
-                    'Latest Current',
-                    '${stats.latestCurrentMa.toStringAsFixed(0)} mA',
+                    'Latest Curent',
+                    '${stats.latestCurentMa.toStringAsFixed(0)} mA',
                     Colors.indigo),
-                _energyMetricTile('Avg Current',
-                    '${stats.avgCurrentA.toStringAsFixed(3)} A', Colors.teal),
-                _energyMetricTile('Peak Current',
-                    '${stats.maxCurrentA.toStringAsFixed(3)} A', Colors.orange),
+                _energyMetricTile('Avg Curent',
+                    '${stats.avgCurentA.toStringAsFixed(3)} A', Colors.teal),
+                _energyMetricTile('Peak Curent',
+                    '${stats.maxCurentA.toStringAsFixed(3)} A', Colors.orange),
                 _energyMetricTile(
                     'Estimated Power',
                     '${stats.latestPowerW.toStringAsFixed(1)} W',
@@ -631,7 +631,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  Widget _buildCurrentEnergyReadings(List<EnergyReading> readings) {
+  Widget _buildCurentEnergyReadings(List<EnergyReading> readings) {
     final List<EnergyReading> sorted = List.of(readings)
       ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
     final List<EnergyReading> latestTen = sorted.take(10).toList();
@@ -648,7 +648,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 Icon(Icons.tune, color: Colors.indigo),
                 SizedBox(width: 8),
                 Text(
-                  'Latest Current Readings',
+                  'Latest Curent Readings',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
               ],
@@ -965,7 +965,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Text(
-                    isOccupied ? 'Currently Occupied' : 'Currently Vacant',
+                    isOccupied ? 'Curently Occupied' : 'Curently Vacant',
                     style: TextStyle(
                       color:
                           isOccupied ? Colors.green[700] : Colors.orange[700],
@@ -1315,7 +1315,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            'Current',
+                            'Curent',
                             style: TextStyle(
                               color: Colors.grey[600],
                               fontSize: 11,
@@ -1742,7 +1742,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                   
                   // Energy Information
                   if (aiRec.currentEnergyWatts != null)
-                    _buildDetailRow('Current Energy', '${aiRec.currentEnergyWatts!.toStringAsFixed(2)} W'),
+                    _buildDetailRow('Curent Energy', '${aiRec.currentEnergyWatts!.toStringAsFixed(2)} W'),
                   
                   // Occupancy Information
                   const Divider(),
@@ -2048,7 +2048,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     );
   }
 
-  /// Sri Lankan timezone (UTC+5:30). Used for Current Energy "Last seen".
+  /// Sri Lankan timezone (UTC+5:30). Used for Curent Energy "Last seen".
   static const Duration _sriLankaOffset = Duration(hours: 5, minutes: 30);
 
   /// Formats [time] as clock time in Sri Lankan timezone (e.g. "8 Mar 2026, 9:18 PM").
@@ -2102,17 +2102,17 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
 enum _AnalyticsTab {
   environment,
-  currentEnergy,
+  curentEnergy,
 }
 
-class _CurrentEnergyStats {
-  _CurrentEnergyStats({
+class _CurentEnergyStats {
+  _CurentEnergyStats({
     required this.latest,
-    required this.latestCurrentA,
-    required this.latestCurrentMa,
-    required this.avgCurrentA,
-    required this.minCurrentA,
-    required this.maxCurrentA,
+    required this.latestCurentA,
+    required this.latestCurentMa,
+    required this.avgCurentA,
+    required this.minCurentA,
+    required this.maxCurentA,
     required this.latestPowerW,
     required this.avgPowerW,
     required this.sampleCount,
@@ -2126,11 +2126,11 @@ class _CurrentEnergyStats {
   });
 
   final EnergyReading? latest;
-  final double latestCurrentA;
-  final double latestCurrentMa;
-  final double avgCurrentA;
-  final double minCurrentA;
-  final double maxCurrentA;
+  final double latestCurentA;
+  final double latestCurentMa;
+  final double avgCurentA;
+  final double minCurentA;
+  final double maxCurentA;
   final double latestPowerW;
   final double avgPowerW;
   final int sampleCount;
@@ -2205,7 +2205,7 @@ class _CompletedEntry {
   final DateTime completedAt;
 }
 
-_CurrentEnergyStats _deriveCurrentEnergyStats(
+_CurentEnergyStats _deriveCurentEnergyStats(
   List<EnergyReading> readings, {
   Map<String, dynamic>? usageResponse,
   String? selectedLocation,
@@ -2220,13 +2220,13 @@ _CurrentEnergyStats _deriveCurrentEnergyStats(
     final trendData = usageResponse['trend'] as Map<String, dynamic>? ?? {};
     final signalData = usageResponse['signal'] as Map<String, dynamic>? ?? {};
 
-    final double latestCurrentA =
+    final double latestCurentA =
         (currentAData['latest'] as num?)?.toDouble() ?? 0;
-    final double latestCurrentMa =
+    final double latestCurentMa =
         (currentMaData['latest'] as num?)?.toDouble() ?? 0;
-    final double avgCurrentA = (currentAData['avg'] as num?)?.toDouble() ?? 0;
-    final double minCurrentA = (currentAData['min'] as num?)?.toDouble() ?? 0;
-    final double maxCurrentA = (currentAData['max'] as num?)?.toDouble() ?? 0;
+    final double avgCurentA = (currentAData['avg'] as num?)?.toDouble() ?? 0;
+    final double minCurentA = (currentAData['min'] as num?)?.toDouble() ?? 0;
+    final double maxCurentA = (currentAData['max'] as num?)?.toDouble() ?? 0;
 
     final double latestPowerW = (powerWData['latest'] as num?)?.toDouble() ?? 0;
     final double avgPowerW = (powerWData['avg'] as num?)?.toDouble() ?? 0;
@@ -2282,13 +2282,13 @@ _CurrentEnergyStats _deriveCurrentEnergyStats(
       latest = readings.isNotEmpty ? readings.first : null;
     }
 
-    return _CurrentEnergyStats(
+    return _CurentEnergyStats(
       latest: latest,
-      latestCurrentA: latestCurrentA,
-      latestCurrentMa: latestCurrentMa,
-      avgCurrentA: avgCurrentA,
-      minCurrentA: minCurrentA,
-      maxCurrentA: maxCurrentA,
+      latestCurentA: latestCurentA,
+      latestCurentMa: latestCurentMa,
+      avgCurentA: avgCurentA,
+      minCurentA: minCurentA,
+      maxCurentA: maxCurentA,
       latestPowerW: latestPowerW,
       avgPowerW: avgPowerW,
       sampleCount: sampleCount,
@@ -2304,13 +2304,13 @@ _CurrentEnergyStats _deriveCurrentEnergyStats(
 
   // Fallback to client-side computation if backend data not available
   if (readings.isEmpty) {
-    return _CurrentEnergyStats(
+    return _CurentEnergyStats(
       latest: null,
-      latestCurrentA: 0,
-      latestCurrentMa: 0,
-      avgCurrentA: 0,
-      minCurrentA: 0,
-      maxCurrentA: 0,
+      latestCurentA: 0,
+      latestCurentMa: 0,
+      avgCurentA: 0,
+      minCurentA: 0,
+      maxCurentA: 0,
       latestPowerW: 0,
       avgPowerW: 0,
       sampleCount: 0,
@@ -2331,16 +2331,16 @@ _CurrentEnergyStats _deriveCurrentEnergyStats(
   final List<double> currentValues =
       sorted.map((r) => r.currentA).where((v) => v >= 0).toList();
 
-  final double avgCurrentA = currentValues.isEmpty
+  final double avgCurentA = currentValues.isEmpty
       ? 0
       : currentValues.reduce((a, b) => a + b) / currentValues.length;
-  final double minCurrentA =
+  final double minCurentA =
       currentValues.isEmpty ? 0 : currentValues.reduce((a, b) => a < b ? a : b);
-  final double maxCurrentA =
+  final double maxCurentA =
       currentValues.isEmpty ? 0 : currentValues.reduce((a, b) => a > b ? a : b);
 
   final double latestPowerW = latest.currentA * 230.0;
-  final double avgPowerW = avgCurrentA * 230.0;
+  final double avgPowerW = avgCurentA * 230.0;
 
   final List<EnergyReading> recentSlice =
       sorted.length >= 6 ? sorted.sublist(sorted.length - 3) : sorted;
@@ -2407,13 +2407,13 @@ _CurrentEnergyStats _deriveCurrentEnergyStats(
   final int windowMinutes =
       lastTime.difference(firstTime).inMinutes.clamp(0, 1 << 16).toInt();
 
-  return _CurrentEnergyStats(
+  return _CurentEnergyStats(
     latest: latest,
-    latestCurrentA: latest.currentA,
-    latestCurrentMa: latest.currentMa,
-    avgCurrentA: avgCurrentA,
-    minCurrentA: minCurrentA,
-    maxCurrentA: maxCurrentA,
+    latestCurentA: latest.currentA,
+    latestCurentMa: latest.currentMa,
+    avgCurentA: avgCurentA,
+    minCurentA: minCurentA,
+    maxCurentA: maxCurentA,
     latestPowerW: latestPowerW,
     avgPowerW: avgPowerW,
     sampleCount: sorted.length,
