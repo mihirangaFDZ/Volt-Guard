@@ -2,6 +2,9 @@ import 'dart:math';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:volt_guard/providers/theme_provider.dart';
 import 'package:volt_guard/services/dashboard_service.dart';
@@ -20,12 +23,14 @@ class _DashboardPageState extends State<DashboardPage> {
   String? _error;
 
   Map<String, dynamic> _todayEnergy = {};
+  Map<String, dynamic>? _totalBill;
   Map<String, dynamic> _prediction = {};
   List<dynamic> _anomalies = [];
   List<dynamic> _recommendations = [];
   List<dynamic> _devices = [];
   Map<String, dynamic>? _topDevice;
   String? _selectedDeviceId;
+  bool _isGeneratingReport = false;
 
   // Chart & savings state
   String _chartPeriod = 'day';
@@ -48,6 +53,7 @@ class _DashboardPageState extends State<DashboardPage> {
       final data = await DashboardService.getSummary();
       setState(() {
         _todayEnergy = data['today_energy'] as Map<String, dynamic>? ?? {};
+        _totalBill = data['total_bill'] as Map<String, dynamic>?;
         _prediction = data['prediction'] as Map<String, dynamic>? ?? {};
         _anomalies = data['anomalies'] as List<dynamic>? ?? [];
         _recommendations = data['recommendations'] as List<dynamic>? ?? [];
@@ -517,7 +523,10 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildTodayEnergyCard(BuildContext context) {
     final totalKwh = (_todayEnergy['total_kwh'] as num?)?.toDouble() ?? 0.0;
-    final cost = _calculateTariffCostLkr(totalKwh, billingDays: 1);
+    // Use backend saved total bill when available (from bills table); fallback to local tariff
+    final cost = (_totalBill != null && _totalBill!['total_bill_lkr'] != null)
+        ? (_totalBill!['total_bill_lkr'] as num).toDouble()
+        : _calculateTariffCostLkr(totalKwh, billingDays: 1);
     final peakHourUtc = _todayEnergy['peak_hour'] as String? ?? 'N/A';
     final peakHour = _convertUtcHourRangeToSriLanka(peakHourUtc);
     final avgPower = (_todayEnergy['avg_power_w'] as num?)?.toDouble() ?? 0.0;
@@ -626,10 +635,207 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ),
             ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _isGeneratingReport ? null : _generateAndDownloadReport,
+                icon: _isGeneratingReport
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.picture_as_pdf_outlined, size: 22),
+                label: Text(_isGeneratingReport ? 'Generating…' : 'Generate report (PDF)'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _generateAndDownloadReport() async {
+    setState(() => _isGeneratingReport = true);
+    try {
+      final totalKwh = (_todayEnergy['total_kwh'] as num?)?.toDouble() ?? 0.0;
+      final cost = (_totalBill != null && _totalBill!['total_bill_lkr'] != null)
+          ? (_totalBill!['total_bill_lkr'] as num).toDouble()
+          : _calculateTariffCostLkr(totalKwh, billingDays: 1);
+      final peakHour = _todayEnergy['peak_hour'] as String? ?? 'N/A';
+      final avgPower = (_todayEnergy['avg_power_w'] as num?)?.toDouble() ?? 0.0;
+      final readingsCount = (_todayEnergy['readings_count'] as num?)?.toInt() ?? 0;
+      final billDate = _totalBill?['date'] as String? ?? DateTime.now().toUtc().toIso8601String().split('T').first;
+      final reportDate = DateTime.now().toIso8601String();
+
+      final pdf = pw.Document();
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(24),
+          build: (pw.Context context) => [
+            pw.Text(
+              'Volt Guard',
+              style: pw.TextStyle(
+                fontSize: 22,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 8),
+            pw.Text(
+              'Consumption & Bill Report',
+              style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              'Generated: $reportDate',
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(12),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey400),
+                borderRadius: pw.BorderRadius.circular(8),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('Report period (day)', style: pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(billDate, style: const pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 16),
+            pw.Table(
+              border: pw.TableBorder.all(color: PdfColors.grey300),
+              children: [
+                pw.TableRow(
+                  decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Metric', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Value', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Total consumption'),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('${totalKwh.toStringAsFixed(2)} kWh'),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Total bill (estimated)'),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Rs. ${cost.toStringAsFixed(2)}'),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Peak hour'),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text(peakHour),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Average power'),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text(_formatPower(avgPower)),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Readings count'),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('$readingsCount'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 16),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(10),
+              color: PdfColors.grey100,
+              child: pw.Text(
+                _simpleTariffCalculation(totalKwh, billingDays: 1),
+                style: const pw.TextStyle(fontSize: 9),
+              ),
+            ),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'This report is generated by Volt Guard. Values are based on energy readings and CEB domestic tariff.',
+              style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+            ),
+          ],
+        ),
+      );
+
+      final bytes = await pdf.save();
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'volt_guard_report_$billDate.pdf',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Report saved. Use Share to save or print.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to generate report: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isGeneratingReport = false);
+    }
   }
 
   Widget _buildQuickStat(

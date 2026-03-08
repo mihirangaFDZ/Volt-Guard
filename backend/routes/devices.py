@@ -5,13 +5,10 @@ from database import devices_col, energy_col
 from app.models.device_model import Device, RelayStateUpdate
 from utils.jwt_handler import get_current_user
 
-router = APIRouter(
-    prefix="/devices",
-    tags=["Devices"],
-    dependencies=[Depends(get_current_user)],
-)
+router = APIRouter(prefix="/devices", tags=["Devices"])
 
-@router.post("/")
+
+@router.post("/", dependencies=[Depends(get_current_user)])
 def add_device(device: Device):
     # Validate module_id exists in energy_readings if provided
     if device.module_id:
@@ -26,12 +23,12 @@ def add_device(device: Device):
     return {"message": "Device added successfully"}
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(get_current_user)])
 def get_devices(location: Optional[str] = Query(None, description="Filter devices by location")):
     query = {"location": location} if location else {}
     return list(devices_col.find(query, {"_id": 0}))
 
-@router.get("/{device_id}")
+@router.get("/{device_id}", dependencies=[Depends(get_current_user)])
 def get_device(device_id: str):
     return devices_col.find_one({"device_id": device_id}, {"_id": 0})
 
@@ -77,7 +74,7 @@ def get_device_energy_readings(
         "count": len(readings)
     }
 
-@router.put("/{device_id}/module")
+@router.put("/{device_id}/module", dependencies=[Depends(get_current_user)])
 def update_device_module(device_id: str, module_id: str):
     """
     Update or assign module_id to a device
@@ -101,13 +98,13 @@ def update_device_module(device_id: str, module_id: str):
     
     return {"message": f"Module {module_id} assigned to device {device_id}"}
 
-@router.delete("/{device_id}")
+@router.delete("/{device_id}", dependencies=[Depends(get_current_user)])
 def delete_device(device_id: str):
     devices_col.delete_one({"device_id": device_id})
     return {"message": "Device removed"}
 
 
-@router.put("/{device_id}/relay")
+@router.put("/{device_id}/relay", dependencies=[Depends(get_current_user)])
 def update_relay_state(device_id: str, payload: RelayStateUpdate):
     """
     Update the desired relay state for a device.
@@ -132,7 +129,7 @@ def update_relay_state(device_id: str, payload: RelayStateUpdate):
     }
 
 
-@router.get("/{device_id}/relay")
+@router.get("/{device_id}/relay", dependencies=[Depends(get_current_user)])
 def get_relay_state(device_id: str):
     """
     Get the current desired relay state for a device.

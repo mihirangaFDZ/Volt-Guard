@@ -13,11 +13,8 @@ from database import (
 from app.models.fault_model import Fault, FaultSummary
 from utils.jwt_handler import get_current_user
 
-router = APIRouter(
-    prefix="/faults",
-    tags=["Fault Detection"],
-    dependencies=[Depends(get_current_user)],
-)
+router = APIRouter(prefix="/faults", tags=["Fault Detection"])
+
 
 SEVERITY_ORDER = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
 
@@ -32,7 +29,7 @@ def _default_summary() -> FaultSummary:
     )
 
 
-@router.get("/active", response_model=List[Fault])
+@router.get("/active", response_model=List[Fault], dependencies=[Depends(get_current_user)])
 def get_active_faults(
     severity: Optional[str] = Query(None, pattern="^(Critical|High|Medium|Low)$"),
     limit: int = Query(20, ge=1, le=100),
@@ -59,7 +56,7 @@ def get_fault_history(
     return data
 
 
-@router.get("/device-health")
+@router.get("/device-health", dependencies=[Depends(get_current_user)])
 def get_device_health(limit: int = Query(20, ge=1, le=100)):
     """
     Derives device health from recent energy + occupancy telemetry.
@@ -95,7 +92,7 @@ def get_device_health(limit: int = Query(20, ge=1, le=100)):
         return []
 
 
-@router.get("/model-stats")
+@router.get("/model-stats", dependencies=[Depends(get_current_user)])
 def get_model_stats():
     return {
         "model_accuracy": 0.942,
@@ -107,7 +104,7 @@ def get_model_stats():
     }
 
 
-@router.post("/", response_model=Fault)
+@router.post("/", response_model=Fault, dependencies=[Depends(get_current_user)])
 def create_fault(fault: Fault):
     payload = fault.dict()
     payload["detected_at"] = payload["detected_at"] or datetime.utcnow()
@@ -116,7 +113,7 @@ def create_fault(fault: Fault):
     return payload
 
 
-@router.get("/{fault_id}", response_model=Fault)
+@router.get("/{fault_id}", response_model=Fault, dependencies=[Depends(get_current_user)])
 def get_fault(fault_id: str):
     fault = faults_col.find_one({"fault_id": fault_id}, {"_id": 0})
     if not fault:
@@ -124,7 +121,7 @@ def get_fault(fault_id: str):
     return fault
 
 
-@router.get("/analytics/trends")
+@router.get("/analytics/trends", dependencies=[Depends(get_current_user)])
 def get_fault_trends(days: int = Query(7, ge=1, le=90)):
     """
     Get fault trends over time, grouped by day and severity.
@@ -171,7 +168,7 @@ def get_fault_trends(days: int = Query(7, ge=1, le=90)):
         return {"trends": [], "period_days": days, "error": str(e)}
 
 
-@router.get("/analytics/predictive-warnings")
+@router.get("/analytics/predictive-warnings", dependencies=[Depends(get_current_user)])
 def get_predictive_warnings():
     """
     Get predictive fault warnings based on prediction models and energy patterns.
@@ -256,7 +253,7 @@ def get_predictive_warnings():
         return {"warnings": []}
 
 
-@router.get("/analytics/energy-correlation")
+@router.get("/analytics/energy-correlation", dependencies=[Depends(get_current_user)])
 def get_energy_fault_correlation(device_id: Optional[str] = None, hours: int = Query(24, ge=1, le=168)):
     try:
         end_time = datetime.utcnow()
@@ -332,7 +329,7 @@ def get_energy_fault_correlation(device_id: Optional[str] = None, hours: int = Q
         return {"correlations": [], "period_hours": hours}
 
 
-@router.get("/analytics/patterns")
+@router.get("/analytics/patterns", dependencies=[Depends(get_current_user)])
 def get_fault_patterns():
     """
     Identify fault patterns by grouping similar faults.
@@ -406,7 +403,7 @@ def get_fault_patterns():
         return {"patterns": []}
 
 
-@router.get("/analytics/zone-heatmap")
+@router.get("/analytics/zone-heatmap", dependencies=[Depends(get_current_user)])
 def get_zone_heatmap():
     """
     Get fault distribution by location/zone for heatmap visualization.

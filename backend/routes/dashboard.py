@@ -1,31 +1,20 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
+from pymongo.errors import NetworkTimeout, ServerSelectionTimeoutError
 
-from database import energy_col, prediction_col, anomalies_col, devices_col, analytics_col
+from database import energy_col, prediction_col, anomaly_col, devices_col, analytics_col, bills_col
 from routes.analytics import _derive_recommendations
-from utils.jwt_handler import get_current_user
 
-router = APIRouter(
-    prefix="/dashboard",
-    tags=["Dashboard"],
-    dependencies=[Depends(get_current_user)],
-)
+router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+
 
 VOLTAGE = 230.0  # Sri Lanka standard voltage
 
-# ── Sri Lankan CEB domestic block tariff (2024 revision) ────────────
-# Monthly consumption tiers + fixed charge
-CEB_BLOCKS = [
-    (30, 8),    # 0-30   units: LKR 8/unit
-    (30, 10),   # 31-60  units: LKR 10/unit
-    (30, 16),   # 61-90  units: LKR 16/unit
-    (30, 50),   # 91-120 units: LKR 50/unit
-    (60, 75),   # 121-180 units: LKR 75/unit
-]
-CEB_ABOVE_180_RATE = 75   # LKR/unit for >180 units
-CEB_FIXED_CHARGE = 400.0  # LKR/month
+# ── Sri Lankan CEB domestic tariff (30-day billing cycle) ──────────
+# Ref: Official tariff table – Domestic 0–60 kWh and above 60 kWh tiers
+# Energy charges (LKR/kWh) and fixed charges (LKR/month) by block
 
 # Typical daily runtime hours per device type without smart management
 TYPICAL_DAILY_HOURS: Dict[str, float] = {
@@ -40,21 +29,49 @@ DEFAULT_DAILY_HOURS = 8.0
 
 
 def _calculate_monthly_lkr(monthly_kwh: float) -> float:
-    """Apply CEB domestic block tariff to monthly kWh and return LKR."""
+    """
+    Apply CEB domestic tariff (30-day cycle) to monthly kWh; return LKR.
+    Two-tier: 0–60 kWh (blocks 0–30 @ 4.50, 31–60 @ 8.00; fixed 80/210);
+    above 60 kWh (blocks 0–60 @ 12.75, 61–90 @ 18.50, 91–120 @ 24.00,
+    121–180 @ 41.00, >180 @ 61.00; fixed 400/1000/1500/2100 by highest block).
+    """
     if monthly_kwh <= 0:
         return 0.0
-    cost = 0.0
-    remaining = monthly_kwh
-    for block_size, rate in CEB_BLOCKS:
-        if remaining <= 0:
-            break
-        units = min(remaining, block_size)
-        cost += units * rate
-        remaining -= units
-    if remaining > 0:
-        cost += remaining * CEB_ABOVE_180_RATE
-    cost += CEB_FIXED_CHARGE
-    return round(cost, 2)
+    energy_cost = 0.0
+    fixed_lkr = 0.0
+
+    if monthly_kwh <= 60:
+        # Tier 1: 0–60 kWh
+        u1 = min(monthly_kwh, 30.0)
+        u2 = max(monthly_kwh - 30.0, 0.0)
+        energy_cost = u1 * 4.50 + u2 * 8.00
+        fixed_lkr = 80.0 if monthly_kwh <= 30 else 210.0
+    else:
+        # Tier 2: above 60 kWh
+        remaining = monthly_kwh
+        energy_cost += min(remaining, 60.0) * 12.75
+        remaining -= 60.0
+        if remaining > 0:
+            energy_cost += min(remaining, 30.0) * 18.50
+            remaining -= 30.0
+        if remaining > 0:
+            energy_cost += min(remaining, 30.0) * 24.00
+            remaining -= 30.0
+        if remaining > 0:
+            energy_cost += min(remaining, 60.0) * 41.00
+            remaining -= 60.0
+        if remaining > 0:
+            energy_cost += remaining * 61.00
+        if monthly_kwh <= 90:
+            fixed_lkr = 400.0
+        elif monthly_kwh <= 120:
+            fixed_lkr = 1000.0
+        elif monthly_kwh <= 180:
+            fixed_lkr = 1500.0
+        else:
+            fixed_lkr = 2100.0
+
+    return round(energy_cost + fixed_lkr, 2)
 
 
 def _kwh_to_lkr(kwh: float, period_days: float) -> float:
@@ -238,114 +255,179 @@ def _daily_baseline_kwh() -> float:
 # ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════
 
+def _upsert_daily_bill(date_str: str, total_kwh: float, total_bill_lkr: float, readings_count: int) -> dict:
+    """Save or update daily bill in bills collection. Returns the saved bill doc (for API)."""
+    now = datetime.utcnow()
+    doc = {
+        "date": date_str,
+        "period_type": "daily",
+        "total_kwh": round(total_kwh, 2),
+        "total_bill_lkr": round(total_bill_lkr, 2),
+        "readings_count": readings_count,
+        "updated_at": now,
+    }
+    bills_col.update_one(
+        {"date": date_str, "period_type": "daily"},
+        {"$set": doc},
+        upsert=True,
+    )
+    return {**doc, "saved_at": now.isoformat()}
+
+
+def _summary_fallback(date_str: str) -> dict:
+    """Return a minimal valid summary when MongoDB times out."""
+    empty_energy = {
+        "total_kwh": 0.0,
+        "estimated_cost_lkr": 0.0,
+        "avg_power_w": 0.0,
+        "peak_hour": "N/A",
+        "readings_count": 0,
+    }
+    return {
+        "today_energy": empty_energy,
+        "total_bill": {
+            "date": date_str,
+            "period_type": "daily",
+            "total_kwh": 0.0,
+            "total_bill_lkr": 0.0,
+            "readings_count": 0,
+            "saved_at": datetime.utcnow().isoformat(),
+        },
+        "prediction": {
+            "total_predicted_kwh": 0.0,
+            "estimated_cost_lkr": 0.0,
+            "change_percent": 0.0,
+            "avg_confidence": 0.0,
+        },
+        "anomalies": [],
+        "recommendations": [],
+        "devices": [],
+        "top_anomaly_device": None,
+        "database_timeout": True,
+    }
+
+
 @router.get("/summary")
 def get_dashboard_summary():
     """Aggregated dashboard data for the mobile app."""
-
-    # --- 1. Today's Energy ---
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_readings = _query_readings_since(today_start, limit=5000)
-    today_energy = _compute_today_energy(today_readings)
+    date_str = today_start.strftime("%Y-%m-%d")
 
-    # --- 2. Predictions ---
-    predictions = list(prediction_col.find({"prediction_type": "daily"}, {"_id": 0}))
-    total_predicted_kwh = sum(p.get("predicted_energy_kwh", 0) for p in predictions)
-    avg_confidence = (
-        sum(p.get("confidence_score", 0) for p in predictions) / len(predictions)
-        if predictions else 0
-    )
-    change_percent = 0.0
-    if today_energy["total_kwh"] > 0:
-        change_percent = round(
-            ((total_predicted_kwh - today_energy["total_kwh"]) / today_energy["total_kwh"]) * 100, 1
+    try:
+        # --- 1. Today's Energy ---
+        today_readings = _query_readings_since(today_start, limit=5000)
+        today_energy = _compute_today_energy(today_readings)
+
+        # --- 1b. Save total bill to database (daily record) ---
+        total_bill = _upsert_daily_bill(
+            date_str,
+            today_energy["total_kwh"],
+            today_energy["estimated_cost_lkr"],
+            today_energy.get("readings_count", 0),
         )
 
-    prediction_data = {
-        "total_predicted_kwh": round(total_predicted_kwh, 2),
-        "estimated_cost_lkr": _kwh_to_lkr(total_predicted_kwh, 1),
-        "change_percent": change_percent,
-        "avg_confidence": round(avg_confidence, 2),
-    }
-
-    # --- 3. Active Anomalies ---
-    anomalies_raw = list(anomalies_col.find({}, {"_id": 0}).sort("detected_at", -1).limit(10))
-    anomalies = []
-    for a in anomalies_raw:
-        device = devices_col.find_one({"device_id": a.get("device_id")}, {"_id": 0})
-        a["device_name"] = device.get("device_name", "Unknown") if device else "Unknown"
-        a["device_type"] = device.get("device_type", "") if device else ""
-        if isinstance(a.get("detected_at"), datetime):
-            a["detected_at"] = a["detected_at"].isoformat()
-        anomalies.append(a)
-
-    # --- 4. Recommendations ---
-    analytics_docs = list(
-        analytics_col.find({}, {"_id": 0}).sort([("received_at", -1), ("_id", -1)]).limit(50)
-    )
-    recommendations = [r.dict() for r in _derive_recommendations(analytics_docs)]
-
-    # --- 5. Devices with current usage ---
-    devices = list(devices_col.find({}, {"_id": 0}))
-    device_usage = []
-    for d in devices:
-        module_id = d.get("module_id")
-        current_a = 0.0
-        if module_id:
-            latest = energy_col.find_one(
-                {"module": module_id}, {"_id": 0},
-                sort=[("received_at", -1), ("_id", -1)],
+        # --- 2. Predictions ---
+        predictions = list(prediction_col.find({"prediction_type": "daily"}, {"_id": 0}))
+        total_predicted_kwh = sum(p.get("predicted_energy_kwh", 0) for p in predictions)
+        avg_confidence = (
+            sum(p.get("confidence_score", 0) for p in predictions) / len(predictions)
+            if predictions else 0
+        )
+        change_percent = 0.0
+        if today_energy["total_kwh"] > 0:
+            change_percent = round(
+                ((total_predicted_kwh - today_energy["total_kwh"]) / today_energy["total_kwh"]) * 100, 1
             )
-            if latest:
-                current_a = _extract_current_a(latest)
-        current_power_w = current_a * VOLTAGE
-        rated = d.get("rated_power_watts", 0)
-        usage_pct = min((current_power_w / rated) if rated > 0 else 0.0, 1.0)
 
-        if current_power_w > rated * 0.7 and rated > 0:
-            status = "High"
-        elif current_power_w > rated * 0.3 and rated > 0:
-            status = "Medium"
-        elif current_power_w > 0:
-            status = "Normal"
-        else:
-            status = "Off"
-
-        device_usage.append({
-            "device_id": d.get("device_id"),
-            "device_name": d.get("device_name"),
-            "device_type": d.get("device_type"),
-            "location": d.get("location"),
-            "rated_power_watts": rated,
-            "current_power_w": round(current_power_w, 1),
-            "current_a": round(current_a, 4),
-            "relay_state": d.get("relay_state", "OFF"),
-            "usage_percentage": round(usage_pct, 2),
-            "status": status,
-        })
-    device_usage.sort(key=lambda x: x["current_power_w"], reverse=True)
-
-    # --- 6. Top device for behaviour comparison ---
-    top_device = None
-    active_devices = [d for d in device_usage if d["current_power_w"] > 0]
-    if active_devices:
-        top = max(active_devices, key=lambda d: d["usage_percentage"])
-        rated_w = top["rated_power_watts"]
-        current_w = top["current_power_w"]
-        top_device = {
-            "device_name": top["device_name"],
-            "rated_power_w": rated_w,
-            "current_power_w": current_w,
-            "difference_percent": round(((current_w / rated_w) * 100), 0) if rated_w > 0 else 0,
+        prediction_data = {
+            "total_predicted_kwh": round(total_predicted_kwh, 2),
+            "estimated_cost_lkr": _kwh_to_lkr(total_predicted_kwh, 1),
+            "change_percent": change_percent,
+            "avg_confidence": round(avg_confidence, 2),
         }
 
-    return {
-        "today_energy": today_energy,
-        "prediction": prediction_data,
-        "anomalies": anomalies,
-        "recommendations": recommendations,
-        "devices": device_usage,
-        "top_anomaly_device": top_device,
-    }
+        # --- 3. Active Anomalies ---
+        anomalies_raw = list(anomaly_col.find({}, {"_id": 0}).sort("detected_at", -1).limit(10))
+        anomalies = []
+        for a in anomalies_raw:
+            device = devices_col.find_one({"device_id": a.get("device_id")}, {"_id": 0})
+            a["device_name"] = device.get("device_name", "Unknown") if device else "Unknown"
+            a["device_type"] = device.get("device_type", "") if device else ""
+            if isinstance(a.get("detected_at"), datetime):
+                a["detected_at"] = a["detected_at"].isoformat()
+            anomalies.append(a)
+
+        # --- 4. Recommendations ---
+        analytics_docs = list(
+            analytics_col.find({}, {"_id": 0}).sort([("received_at", -1), ("_id", -1)]).limit(50)
+        )
+        recommendations = [r.dict() for r in _derive_recommendations(analytics_docs)]
+
+        # --- 5. Devices with current usage ---
+        devices = list(devices_col.find({}, {"_id": 0}))
+        device_usage = []
+        for d in devices:
+            module_id = d.get("module_id")
+            current_a = 0.0
+            if module_id:
+                latest = energy_col.find_one(
+                    {"module": module_id}, {"_id": 0},
+                    sort=[("received_at", -1), ("_id", -1)],
+                )
+                if latest:
+                    current_a = _extract_current_a(latest)
+            current_power_w = current_a * VOLTAGE
+            rated = d.get("rated_power_watts", 0)
+            usage_pct = min((current_power_w / rated) if rated > 0 else 0.0, 1.0)
+
+            if current_power_w > rated * 0.7 and rated > 0:
+                status = "High"
+            elif current_power_w > rated * 0.3 and rated > 0:
+                status = "Medium"
+            elif current_power_w > 0:
+                status = "Normal"
+            else:
+                status = "Off"
+
+            device_usage.append({
+                "device_id": d.get("device_id"),
+                "device_name": d.get("device_name"),
+                "device_type": d.get("device_type"),
+                "location": d.get("location"),
+                "rated_power_watts": rated,
+                "current_power_w": round(current_power_w, 1),
+                "current_a": round(current_a, 4),
+                "relay_state": d.get("relay_state", "OFF"),
+                "usage_percentage": round(usage_pct, 2),
+                "status": status,
+            })
+        device_usage.sort(key=lambda x: x["current_power_w"], reverse=True)
+
+        # --- 6. Top device for behaviour comparison ---
+        top_device = None
+        active_devices = [d for d in device_usage if d["current_power_w"] > 0]
+        if active_devices:
+            top = max(active_devices, key=lambda d: d["usage_percentage"])
+            rated_w = top["rated_power_watts"]
+            current_w = top["current_power_w"]
+            top_device = {
+                "device_name": top["device_name"],
+                "rated_power_w": rated_w,
+                "current_power_w": current_w,
+                "difference_percent": round(((current_w / rated_w) * 100), 0) if rated_w > 0 else 0,
+            }
+
+        return {
+            "today_energy": today_energy,
+            "total_bill": total_bill,
+            "prediction": prediction_data,
+            "anomalies": anomalies,
+            "recommendations": recommendations,
+            "devices": device_usage,
+            "top_anomaly_device": top_device,
+        }
+    except (NetworkTimeout, ServerSelectionTimeoutError):
+        return _summary_fallback(date_str)
 
 
 # ── Energy Chart Endpoint ───────────────────────────────────────────
