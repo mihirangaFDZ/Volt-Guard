@@ -477,13 +477,17 @@ def get_dashboard_summary():
             "avg_confidence": round(avg_confidence, 2),
         }
 
-        # --- 3. Active Anomalies ---
+        # --- 3. Active Anomalies (from DB, enriched with device name/type by device_id, location, or module) ---
         anomalies_raw = list(anomaly_col.find({}, {"_id": 0}).sort("detected_at", -1).limit(10))
         anomalies = []
         for a in anomalies_raw:
             device = devices_col.find_one({"device_id": a.get("device_id")}, {"_id": 0})
-            a["device_name"] = device.get("device_name", "Unknown") if device else "Unknown"
-            a["device_type"] = device.get("device_type", "") if device else ""
+            if not device and a.get("location"):
+                device = devices_col.find_one({"location": a["location"]})
+            if not device and a.get("module"):
+                device = devices_col.find_one({"module_id": a["module"]}) or devices_col.find_one({"module": a["module"]})
+            a["device_name"] = (device.get("device_name") if device else None) or a.get("device_name") or "Unknown"
+            a["device_type"] = (device.get("device_type") if device else None) or a.get("device_type") or ""
             if isinstance(a.get("detected_at"), datetime):
                 a["detected_at"] = a["detected_at"].isoformat()
             anomalies.append(a)

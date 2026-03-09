@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:volt_guard/services/dashboard_service.dart';
+import 'package:volt_guard/services/anomaly_alert_service.dart';
 
 class AnomaliesPage extends StatefulWidget {
   const AnomaliesPage({super.key});
@@ -12,6 +12,8 @@ class _AnomaliesPageState extends State<AnomaliesPage> {
   bool _isLoading = true;
   String? _error;
   List<dynamic> _anomalies = [];
+  bool _isDetecting = false;
+  final AnomalyAlertService _anomalyService = AnomalyAlertService();
 
   @override
   void initState() {
@@ -19,18 +21,43 @@ class _AnomaliesPageState extends State<AnomaliesPage> {
     _loadAnomalies();
   }
 
+  /// Run anomaly detection on real energy readings from DB; saves results to anomalies table, then refresh list.
+  Future<void> _runDetectionOnRealData() async {
+    if (_isDetecting) return;
+    setState(() => _isDetecting = true);
+    try {
+      await _anomalyService.detectAnomalies(hoursBack: 24, minScore: 0.5, method: 'both');
+      if (!mounted) return;
+      await _loadAnomalies();
+      if (!mounted) return;
+      setState(() => _isDetecting = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _isDetecting = false;
+      });
+    }
+  }
+
+  /// Load active anomalies from the anomalies API (real data from DB only).
   Future<void> _loadAnomalies() async {
     setState(() {
       _isLoading = true;
       _error = null;
     });
     try {
-      final data = await DashboardService.getSummary();
+      final list = await _anomalyService.fetchActiveAlerts(
+        limit: 50,
+        hoursBack: 168,
+      );
+      if (!mounted) return;
       setState(() {
-        _anomalies = data['anomalies'] as List<dynamic>? ?? [];
+        _anomalies = list;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _isLoading = false;
@@ -41,7 +68,22 @@ class _AnomaliesPageState extends State<AnomaliesPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Active Anomalies')),
+      appBar: AppBar(
+        title: const Text('Active Anomalies'),
+        actions: [
+          IconButton(
+            tooltip: 'Detect from real data',
+            icon: _isDetecting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_arrow),
+            onPressed: _isDetecting ? null : _runDetectionOnRealData,
+          ),
+        ],
+      ),
       body: _buildBody(),
     );
   }
@@ -87,20 +129,38 @@ class _AnomaliesPageState extends State<AnomaliesPage> {
 
     if (_anomalies.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.check_circle, size: 64, color: Colors.green.shade400),
-            const SizedBox(height: 16),
-            Text('No active anomalies',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text('All devices are operating normally.',
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.check_circle, size: 64, color: Colors.green.shade400),
+              const SizedBox(height: 16),
+              Text('No active anomalies',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Text(
+                'Anomalies are created from your real energy readings and saved to the database. Tap the play button to run detection on the latest data.',
+                textAlign: TextAlign.center,
                 style: TextStyle(
-                  color:
-                      Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                )),
-          ],
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _isDetecting ? null : _runDetectionOnRealData,
+                icon: _isDetecting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.play_arrow, size: 20),
+                label: Text(_isDetecting ? 'Detecting...' : 'Detect from real data'),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -118,6 +178,8 @@ class _AnomaliesPageState extends State<AnomaliesPage> {
           final description = map['description'] as String? ?? '';
           final severity = map['severity'] as String? ?? 'Low';
           final anomalyType = map['anomaly_type'] as String? ?? '';
+          final detectedAt = map['detected_at']?.toString();
+          final score = (map['anomaly_score'] as num?)?.toDouble();
 
           return Card(
             elevation: 1,
@@ -149,6 +211,26 @@ class _AnomaliesPageState extends State<AnomaliesPage> {
                       ),
                     ),
                   ],
+                  if (detectedAt != null && detectedAt.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _formatDetectedAt(detectedAt),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                      ),
+                    ),
+                  ],
+                  if (score != null && score > 0) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Score: ${score.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                      ),
+                    ),
+                  ],
                 ],
               ),
               trailing: Container(
@@ -173,6 +255,20 @@ class _AnomaliesPageState extends State<AnomaliesPage> {
         },
       ),
     );
+  }
+
+  String _formatDetectedAt(String detectedAt) {
+    try {
+      final dt = DateTime.parse(detectedAt);
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24) return '${diff.inHours}h ago';
+      if (diff.inDays < 7) return '${diff.inDays}d ago';
+      return '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return detectedAt;
+    }
   }
 
   Color _severityColor(String? severity) {

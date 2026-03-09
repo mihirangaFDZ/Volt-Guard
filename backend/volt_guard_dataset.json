@@ -17,6 +17,18 @@
       "answer": "Volt Guard is a Smart Energy Management System that uses IoT and AI. It monitors energy usage, connects to devices (e.g. ESP32), shows analytics and predictions, detects anomalies, and helps you manage consumption. The app has a Dashboard, Devices, Analytics, and an AI Chat (me!) for support."
     },
     {
+      "question": "tell me about Volt Guard",
+      "answer": "Volt Guard is a Smart Energy Management System that uses IoT and AI. It monitors energy usage, connects to devices (e.g. ESP32), shows analytics and predictions, detects anomalies, and helps you manage consumption. The app has a Dashboard, Devices, Analytics, and an AI Chat (me!) for support."
+    },
+    {
+      "question": "explain Volt Guard system",
+      "answer": "Volt Guard is a Smart Energy Management System that uses IoT and AI. It monitors energy usage, connects to devices (e.g. ESP32), shows analytics and predictions, detects anomalies, and helps you manage consumption. The app has a Dashboard, Devices, Analytics, and an AI Chat (me!) for support."
+    },
+    {
+      "question": "how does Volt Guard work?",
+      "answer": "Volt Guard is a Smart Energy Management System that uses IoT and AI. It monitors energy usage, connects to devices (e.g. ESP32), shows analytics and predictions, detects anomalies, and helps you manage consumption. The app has a Dashboard, Devices, Analytics, and an AI Chat (me!) for support."
+    },
+    {
       "question": "what can you do?",
       "answer": "I answer questions about the Volt Guard system. I can explain: the Dashboard and metrics, how to use Devices and locations, Analytics and energy data, ML predictions and forecasts, anomaly detection and alerts, behavioral profiles, fault detection, and general usage. Just ask!"
     },
@@ -26,6 +38,14 @@
     },
     {
       "question": "what is the dashboard?",
+      "answer": "The Dashboard in Volt Guard gives you an overview of your energy system: current power usage, consumption, cost, active devices, and key metrics. It's the main screen when you open the app, so you can see at a glance how much energy you're using and how much it costs."
+    },
+    {
+      "question": "explain the dashboard",
+      "answer": "The Dashboard in Volt Guard gives you an overview of your energy system: current power usage, consumption, cost, active devices, and key metrics. It's the main screen when you open the app, so you can see at a glance how much energy you're using and how much it costs."
+    },
+    {
+      "question": "what does the dashboard show?",
       "answer": "The Dashboard in Volt Guard gives you an overview of your energy system: current power usage, consumption, cost, active devices, and key metrics. It's the main screen when you open the app, so you can see at a glance how much energy you're using and how much it costs."
     },
     {
@@ -53,6 +73,14 @@
       "answer": "Anomalies are unusual patterns in your energy data—e.g. sudden spikes or drops. Volt Guard can detect these and send alerts. The system has endpoints for recent alerts, active anomalies, and running detection. You can see anomaly severity and which device or location is affected."
     },
     {
+      "question": "tell me about anomalies",
+      "answer": "Anomalies are unusual patterns in your energy data—e.g. sudden spikes or drops. Volt Guard can detect these and send alerts. The system has endpoints for recent alerts, active anomalies, and running detection. You can see anomaly severity and which device or location is affected."
+    },
+    {
+      "question": "what are alerts in Volt Guard?",
+      "answer": "Anomalies are unusual patterns in your energy data—e.g. sudden spikes or drops. Volt Guard can detect these and send alerts. The system has endpoints for recent alerts, active anomalies, and running detection. You can see anomaly severity and which device or location is affected."
+    },
+    {
       "question": "how does anomaly detection work?",
       "answer": "Anomaly detection in Volt Guard analyzes energy readings (current, power, etc.) and flags values that don't match normal behavior. The backend may use statistical or ML-based methods. Alerts include severity and can be filtered. Check the Anomalies or Alerts section in the app for details."
     },
@@ -66,6 +94,14 @@
     },
     {
       "question": "how do I see energy usage?",
+      "answer": "Energy usage is shown in several places: the Dashboard (overview), Analytics (trends and by location), and Energy endpoints (latest, by-location, usage). You can also see per-device energy readings on the Devices page. All data is in units like kWh or power in W."
+    },
+    {
+      "question": "where can I see my power consumption?",
+      "answer": "Energy usage is shown in several places: the Dashboard (overview), Analytics (trends and by location), and Energy endpoints (latest, by-location, usage). You can also see per-device energy readings on the Devices page. All data is in units like kWh or power in W."
+    },
+    {
+      "question": "how do I check energy consumption?",
       "answer": "Energy usage is shown in several places: the Dashboard (overview), Analytics (trends and by location), and Energy endpoints (latest, by-location, usage). You can also see per-device energy readings on the Devices page. All data is in units like kWh or power in W."
     },
     {

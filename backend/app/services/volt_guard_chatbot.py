@@ -245,6 +245,34 @@ class VoltGuardChatbot:
     def _normalize(self, s: str) -> str:
         return re.sub(r"\s+", " ", s.strip().lower())
 
+    def _normalize_query_for_matching(self, msg: str) -> str:
+        """
+        Expand common rephrasings and synonyms so similar Volt Guard questions
+        map to the same intent/FAQ. Keeps word order but standardizes terms.
+        """
+        n = self._normalize(msg)
+        # Replace common synonyms / paraphrases with canonical forms (for intent + FAQ)
+        replacements = [
+            (r"\b(usage|consumption|use|using)\b", "consumption"),
+            (r"\b(cost|bill|pay|payment|spend|lkr|rupees)\b", "cost"),
+            (r"\b(how much|how many|number of|count of|total)\b", "how many"),
+            (r"\b(show|list|get|give me|tell me|display|see|check|find)\b", "show"),
+            (r"\b(explain|describe|what is|whats|what's|define)\b", "explain"),
+            (r"\b(energy|power|electricity|current)\b", "energy"),
+            (r"\b(device|devices|appliance)\b", "device"),
+            (r"\b(anomaly|anomalies|alert|alerts|unusual|abnormal)\b", "anomaly"),
+            (r"\b(predict|prediction|forecast|forecasts|future)\b", "predict"),
+            (r"\b(location|locations|zone|zones|room|rooms)\b", "location"),
+            (r"\b(fault|faults|error|failure|problem|issue)\b", "fault"),
+            (r"\b(dashboard|overview|summary|main screen)\b", "dashboard"),
+            (r"\b(volt guard|voltage guard|voltageguard|voltguard)\b", "volt guard"),
+            (r"\b(today|todays|current)\b", "today"),
+            (r"\b(health|status|ok|problem|issue)\b", "status"),
+        ]
+        for pattern, canonical in replacements:
+            n = re.sub(pattern, canonical, n, flags=re.IGNORECASE)
+        return re.sub(r"\s+", " ", n).strip()
+
     @staticmethod
     def _parse_ts(raw: Any) -> Optional[datetime]:
         if raw is None:
@@ -280,10 +308,12 @@ class VoltGuardChatbot:
         return 0.0
 
     def _is_data_intent(self, msg: str) -> Optional[str]:
-        """Detect intent from any Volt Guard system-related question (case-insensitive)."""
+        """Detect intent from any Volt Guard system-related question. Uses word-pattern and synonym analysis for similar questions."""
         n = self._normalize(msg)
         if not n:
             return None
+        # Use query normalization so rephrased/similar questions map to same intent
+        qn = self._normalize_query_for_matching(msg)
 
         # System-wide analysis (check first so "analyze system" wins)
         system_phrases = [
@@ -293,28 +323,36 @@ class VoltGuardChatbot:
             "tell me about my system", "system report", "full report", "everything about",
             "how are we doing", "status of my", "report on",
         ]
-        if any(w in n for w in system_phrases):
+        # Check both raw normalized and query-normalized for broader pattern match
+        def _has_any(text, phrases):
+            return any(p in text for p in phrases)
+
+        if _has_any(n, system_phrases) or _has_any(qn, system_phrases):
             return "system_analysis"
-        if any(w in n for w in ["dashboard", "overview"]):
+        if _has_any(n, ["dashboard", "overview"]) or _has_any(qn, ["dashboard", "overview"]):
             return "system_analysis"
 
         # Health / quick status
-        if any(w in n for w in ["health", "everything ok", "all good", "any problem", "any issue"]):
+        if _has_any(n, ["health", "everything ok", "all good", "any problem", "any issue"]) or _has_any(qn, ["status"]):
             return "system_analysis"
 
         # Top consumers / highest power
-        if any(w in n for w in ["top consumer", "highest power", "most power", "which use most", "biggest consumer", "highest usage", "most energy"]):
+        top_consumer_phrases = [
+            "top consumer", "highest power", "most power", "which use most", "biggest consumer",
+            "highest usage", "most energy", "top power", "who use most", "highest consumer",
+        ]
+        if _has_any(n, top_consumer_phrases) or _has_any(qn, top_consumer_phrases):
             return "top_consumers"
 
-        # Devices
+        # Devices (expand patterns for similar questions)
         device_phrases = [
             "how many device", "number of device", "list device", "all device",
             "devices?", "device list", "registered device", "device count",
             "total device", "show device", "list all device", "give me device",
             "my device", "device total", "how many dev", "what device", "which device",
-            "device at", "devices at", "volt guard device",
+            "device at", "devices at", "volt guard device", "how many device",
         ]
-        if any(w in n for w in device_phrases):
+        if _has_any(n, device_phrases) or "device" in qn and ("show" in qn or "how many" in qn or "list" in qn):
             return "devices"
 
         # Energy
@@ -324,32 +362,33 @@ class VoltGuardChatbot:
             "latest energy", "recent energy", "current usage", "energy now",
             "power now", "usage now", "consumption now", "my energy", "my power",
             "energy at", "power at", "usage at", "consumption at", "volt guard energy",
+            "consumption", "usage",
         ]
-        if any(w in n for w in energy_phrases):
-            return "energy" if "at " not in n else "energy_location"
+        if _has_any(n, energy_phrases) or ("energy" in qn and ("show" in qn or "how much" in qn or "current" in qn)):
+            return "energy" if " at " not in n else "energy_location"
 
         # Cost / bill / estimated monthly
-        if any(w in n for w in ["cost", "bill", "estimated monthly", "monthly cost", "how much pay", "lkr", "rupees", "tariff"]):
+        if _has_any(n, ["cost", "bill", "estimated monthly", "monthly cost", "how much pay", "lkr", "rupees", "tariff"]) or "cost" in qn:
             return "consumption_today"
 
         # Consumption today
-        if any(w in n for w in ["today", "consumption today", "usage today", "energy today", "how much today", "used today", "consumed today"]):
-            if any(w in n for w in ["energy", "power", "usage", "consumption", "used", "consumed", "how much", "kwh"]) or len(n) < 25:
+        if _has_any(n, ["today", "consumption today", "usage today", "energy today", "how much today", "used today", "consumed today"]):
+            if _has_any(n, ["energy", "power", "usage", "consumption", "used", "consumed", "how much", "kwh"]) or "today" in qn or len(n) < 25:
                 return "consumption_today"
 
-        # Predictions / forecast / chart summary
-        if any(w in n for w in [
+        # Predictions / forecast
+        if _has_any(n, [
             "predict", "forecast", "prediction", "predicted", "future", "tomorrow", "next day",
             "forecast chart", "chart summary", "forecast summary", "chart", "forecast report",
-        ]):
+        ]) or "predict" in qn:
             return "predictions"
 
         # Occupancy
-        if any(w in n for w in ["occupancy", "occupied", "who is in", "room occupied", "anyone in", "motion", "pir", "rcwl"]):
+        if _has_any(n, ["occupancy", "occupied", "who is in", "room occupied", "anyone in", "motion", "pir", "rcwl"]):
             return "occupancy"
 
         # Anomalies
-        if any(w in n for w in ["anomal", "alert", "unusual", "abnormal", "recent alert", "any alert"]):
+        if _has_any(n, ["anomal", "alert", "unusual", "abnormal", "recent alert", "any alert"]) or "anomaly" in qn:
             return "anomalies"
 
         # Locations
@@ -358,16 +397,16 @@ class VoltGuardChatbot:
             "which location", "what location", "where are we", "which room",
             "list location", "all location", "monitored zone",
         ]
-        if any(w in n for w in loc_phrases):
+        if _has_any(n, loc_phrases) or "location" in qn and ("show" in qn or "list" in qn or "which" in qn):
             return "locations"
 
         # Faults
-        if any(w in n for w in ["fault", "failure", "device health", "error", "device error"]):
+        if _has_any(n, ["fault", "failure", "device health", "error", "device error"]) or "fault" in qn:
             return "faults"
 
         # Volt Guard general question → system analysis
-        if "volt guard" in n or "voltage guard" in n or "voltageguard" in n:
-            if any(w in n for w in ["what", "how", "tell", "explain", "status", "system", "data"]):
+        if "volt guard" in n or "voltage guard" in n or "voltageguard" in n or "volt guard" in qn:
+            if _has_any(n, ["what", "how", "tell", "explain", "status", "system", "data"]) or "explain" in qn or "status" in qn:
                 return "system_analysis"
         return None
 
@@ -727,19 +766,23 @@ class VoltGuardChatbot:
         if data_answer:
             return data_answer, 0.95, suggestions
 
-        # 2) Normal/FAQ from dataset (case-insensitive)
+        # 2) Normal/FAQ from dataset: match on normalized + query-normalized form for similar questions
         if self.question_vectors is not None and self.vectorizer is not None:
             normalized_msg = self._normalize(msg)
-            q_vec = self.vectorizer.transform([normalized_msg])
-            sim = cosine_similarity(q_vec, self.question_vectors)[0]
-            top_idx = np.argsort(sim)[::-1][:top_k]
-            best_sim = float(sim[top_idx[0]])
-            # Use lower threshold for Volt Guard–related questions so we prefer dataset answer
-            use_threshold = threshold
-            if any(w in normalized_msg for w in ["volt", "guard", "dashboard", "system", "device", "energy", "anomal", "predict", "location"]):
-                use_threshold = min(threshold, 0.18)
-            if best_sim >= use_threshold:
-                return self.answers[top_idx[0]], best_sim, suggestions
+            query_normalized = self._normalize_query_for_matching(msg)
+            # Try both forms so rephrased questions still match
+            for text_to_try in [query_normalized, normalized_msg]:
+                q_vec = self.vectorizer.transform([text_to_try])
+                sim = cosine_similarity(q_vec, self.question_vectors)[0]
+                top_idx = np.argsort(sim)[::-1][:max(top_k, 3)]
+                best_sim = float(sim[top_idx[0]])
+                # Lower threshold for Volt Guard–related so similar questions get correct answers
+                use_threshold = threshold
+                volt_guard_words = ["volt", "guard", "dashboard", "system", "device", "energy", "anomal", "predict", "location", "consumption", "cost", "fault"]
+                if any(w in normalized_msg for w in volt_guard_words) or any(w in query_normalized for w in volt_guard_words):
+                    use_threshold = min(threshold, 0.15)
+                if best_sim >= use_threshold:
+                    return self.answers[top_idx[0]], best_sim, suggestions
         return self._fallback(), 0.0, suggestions
 
     def _fallback(self) -> str:
