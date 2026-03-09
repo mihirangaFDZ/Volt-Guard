@@ -215,6 +215,41 @@ class AnalyticsService {
     return [];
   }
 
+  /// Fetch environment (occupancy telemetry) recommendations from the trained model.
+  /// Data is read from occupancy_telemetry table (latest reading per filter).
+  Future<List<Map<String, dynamic>>> fetchEnvironmentRecommendations({
+    String? module,
+    String? location,
+    String? deviceId,
+  }) async {
+    final headers = await _authService.getAuthHeaders();
+    headers['Accept'] = 'application/json';
+
+    final query = <String, String>{};
+    if (module != null && module.isNotEmpty) query['module'] = module;
+    if (location != null && location.isNotEmpty) query['location'] = location;
+    if (deviceId != null && deviceId.isNotEmpty) query['device_id'] = deviceId;
+
+    final uri = Uri.parse(
+            '${ApiConfig.baseUrl}${ApiConfig.analyticsEndpoint}/environment-recommendations')
+        .replace(queryParameters: query.isNotEmpty ? query : null);
+
+    final response = await http
+        .get(uri, headers: headers)
+        .timeout(ApiConfig.analyticsRequestTimeout);
+
+    if (response.statusCode == 200) {
+      final Map<String, dynamic> data =
+          jsonDecode(response.body) as Map<String, dynamic>;
+      final List<dynamic> recs =
+          data['recommendations'] as List<dynamic>? ?? [];
+      return recs
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    }
+    return [];
+  }
+
   Future<List<Map<String, dynamic>>> fetchDevices() async {
     final headers = await _authService.getAuthHeaders();
     headers['Accept'] = 'application/json';

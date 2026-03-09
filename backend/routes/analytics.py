@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from bson.objectid import ObjectId
 from database import analytics_col, energy_col, devices_col, energy_advice_history_col
 from app.services.current_energy_recommendation_model import CurrentEnergyRecommendationModel
+from app.services.occupancy_telemetry_recommendation_model import OccupancyTelemetryRecommendationModel
 from utils.jwt_handler import get_current_user, get_current_user_optional
 from app.models.analytics_model import (
     Recommendation,
@@ -386,6 +387,91 @@ def get_recommendations(limit: int = 50, module: Optional[str] = None, location:
 
     recs = _derive_recommendations(docs)
     return RecommendationsResponse(recommendations=recs, count=len(recs))
+
+
+# ------------------------------------------------------------------
+# Environment recommendations (occupancy_telemetry + trained model)
+# ------------------------------------------------------------------
+
+
+@router.get("/environment-recommendations")
+def get_environment_recommendations(
+    module: Optional[str] = None,
+    location: Optional[str] = None,
+    device_id: Optional[str] = None,
+):
+    """
+    Get actionable environment recommendations from occupancy_telemetry table.
+    Uses the latest reading (temperature, humidity, rcwl, pir, rssi) and the
+    model trained on occupancy_telemetry_recommendations_dataset.csv (1500 rows).
+    Returns accurate, user-understandable advice for the Environment section.
+    """
+    query = {}
+    if module:
+        query["module"] = module
+    if location:
+        query["location"] = location
+    _apply_device_filter(query, device_id)
+
+    cursor = (
+        analytics_col
+        .find(query, {"_id": 0, "temperature": 1, "humidity": 1, "rcwl": 1, "pir": 1, "rssi": 1})
+        .sort([
+            ("received_at", -1),
+            ("receivedAt", -1),
+            ("timestamp", -1),
+            ("_id", -1),
+        ])
+        .limit(1)
+    )
+    latest = next(cursor, None)
+    if not latest:
+        return {"recommendations": [], "message": "No occupancy telemetry data."}
+
+    temperature = latest.get("temperature")
+    humidity = latest.get("humidity")
+    rcwl = latest.get("rcwl", 0)
+    pir = latest.get("pir", 0)
+    rssi = latest.get("rssi")
+
+    if temperature is None or not isinstance(temperature, (int, float)):
+        temperature = 25.0
+    if humidity is None or not isinstance(humidity, (int, float)):
+        humidity = 50.0
+    if not isinstance(rcwl, int):
+        rcwl = 0
+    if not isinstance(pir, int):
+        pir = 0
+    if rssi is not None and not isinstance(rssi, int):
+        rssi = -70
+
+    model = OccupancyTelemetryRecommendationModel()
+    if not model.load_model():
+        # Fallback: derive from docs (same as /recommendations)
+        docs_cursor = (
+            analytics_col
+            .find(query, {"_id": 0})
+            .sort([("received_at", -1), ("receivedAt", -1), ("timestamp", -1), ("_id", -1)])
+            .limit(50)
+        )
+        docs = list(docs_cursor)
+        recs = _derive_recommendations(docs)
+        return {
+            "recommendations": [
+                {"title": r.title, "message": r.detail, "severity": r.severity.value, "advice": None, "mitigation": None}
+                for r in recs
+            ],
+            "message": "Model not trained. Run scripts/train_occupancy_telemetry_recommendation_model.py",
+        }
+
+    recs = model.predict(
+        temperature=float(temperature),
+        humidity=float(humidity),
+        rcwl=int(rcwl),
+        pir=int(pir),
+        rssi=int(rssi) if rssi is not None else None,
+    )
+    return {"recommendations": recs}
 
 
 # ------------------------------------------------------------------
