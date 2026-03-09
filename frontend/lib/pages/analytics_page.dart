@@ -63,6 +63,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   // Current energy recommendations from trained model (CSV dataset)
   List<CurrentReadingRecommendation>? _modelCurrentRecs;
 
+  // Environment (occupancy telemetry) recommendations from trained model
+  List<Map<String, dynamic>>? _modelEnvironmentRecs;
+
   // Energy advice: refresh recommendations every N minutes (default 5), save to history
   static const List<int> _recommendationIntervalOptions = [1, 5, 10, 15, 30];
   int _recommendationIntervalMinutes = 5;
@@ -446,6 +449,21 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         }
       }
 
+      // Fetch environment (occupancy telemetry) recommendations from trained model
+      List<Map<String, dynamic>>? modelEnvRecs;
+      try {
+        final envRecMaps = await _analyticsService.fetchEnvironmentRecommendations(
+          module: _selectedModule,
+          location: _selectedLocation,
+          deviceId: _selectedDeviceId,
+        );
+        if (envRecMaps.isNotEmpty) {
+          modelEnvRecs = envRecMaps;
+        }
+      } catch (_) {
+        // Keep null on failure; Environment section will show AI or empty
+      }
+
       if (!mounted) return;
       setState(() {
         _readings = data;
@@ -454,6 +472,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         _occupancyStats = occupancyStats;
         _aiRecommendations = aiRecsResponse;
         _modelCurrentRecs = modelRecs;
+        _modelEnvironmentRecs = modelEnvRecs;
         final recItems = aiRecs.map((r) => _RecItem(rec: r)).toList();
         _activeRecItems = recItems.take(_maxActiveRecs).toList();
         _backlogRecs = recItems.skip(_maxActiveRecs).map((item) => item.rec).toList();
@@ -598,10 +617,81 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       const SizedBox(height: 16),
       _buildSensorHealth(latest, stats),
       const SizedBox(height: 16),
-      _buildRecommendations(),
+      // Environment section: show occupancy-telemetry-based recommendations first
+      if (_modelEnvironmentRecs != null && _modelEnvironmentRecs!.isNotEmpty)
+        _buildEnvironmentRecommendationsCard()
+      else
+        _buildRecommendations(),
       const SizedBox(height: 16),
       _buildRecentReadings(_readings),
     ];
+  }
+
+  Widget _buildEnvironmentRecommendationsCard() {
+    final recs = _modelEnvironmentRecs!;
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.thermostat, color: Colors.teal),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Environment — actionable recommendations',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Based on occupancy telemetry (temperature, humidity, motion, signal). Data from occupancy_telemetry table.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withOpacity(0.7),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ...recs.map((r) {
+              final severity = (r['severity'] as String?) ?? 'low';
+              IconData icon;
+              Color color;
+              switch (severity.toLowerCase()) {
+                case 'high':
+                  icon = Icons.priority_high;
+                  color = Colors.red;
+                  break;
+                case 'medium':
+                  icon = Icons.info_outline;
+                  color = Colors.orange;
+                  break;
+                default:
+                  icon = Icons.eco;
+                  color = Colors.teal;
+              }
+              return _buildUserFriendlyRecCard(
+                title: (r['title'] as String?) ?? 'Recommendation',
+                message: (r['message'] as String?) ?? '',
+                severity: severity,
+                icon: icon,
+                color: color,
+                advice: r['advice'] as String?,
+                mitigation: r['mitigation'] as String?,
+              );
+            }),
+          ],
+        ),
+      ),
+    );
   }
 
   List<Widget> _buildCurentEnergyAnalytics(bool hasActiveFilters) {
