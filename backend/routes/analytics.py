@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from bson.objectid import ObjectId
 from database import analytics_col, energy_col, devices_col, energy_advice_history_col
 from app.services.current_energy_recommendation_model import CurrentEnergyRecommendationModel
-from utils.jwt_handler import get_current_user_optional
+from utils.jwt_handler import get_current_user, get_current_user_optional
 from app.models.analytics_model import (
     Recommendation,
     RecommendationSeverity,
@@ -25,7 +25,7 @@ SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
 SENSOR_OFFLINE_THRESHOLD_MINUTES = 60
 
 
-@router.get("/filters")
+@router.get("/filters", dependencies=[Depends(get_current_user)])
 def get_available_filters():
     """
     Get available locations and modules from occupancy_telemetry table.
@@ -47,7 +47,7 @@ def get_available_filters():
     }
 
 
-@router.get("/device-filters")
+@router.get("/device-filters", dependencies=[Depends(get_current_user)])
 def get_device_filters():
     """
     Get available devices from devices table.
@@ -360,7 +360,7 @@ def _derive_recommendations(docs: List[dict]) -> List[Recommendation]:
     return recs
 
 
-@router.get("/recommendations", response_model=RecommendationsResponse)
+@router.get("/recommendations", response_model=RecommendationsResponse, dependencies=[Depends(get_current_user)])
 def get_recommendations(limit: int = 50, module: Optional[str] = None, location: Optional[str] = None):
     query = {}
     if module:
@@ -392,7 +392,7 @@ def get_recommendations(limit: int = 50, module: Optional[str] = None, location:
 # Current Energy Analytics Endpoints
 # ------------------------------------------------------------------
 
-@router.get("/energy-filters")
+@router.get("/energy-filters", dependencies=[Depends(get_current_user)])
 def get_energy_filters():
     """
     Get available locations and modules from energy_readings table.

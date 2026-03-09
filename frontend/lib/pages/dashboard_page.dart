@@ -1,10 +1,209 @@
+import 'dart:async';
+import 'dart:math';
+
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:volt_guard/providers/theme_provider.dart';
+import 'package:volt_guard/services/dashboard_service.dart';
+import 'package:volt_guard/pages/anomalies_page.dart';
+import 'package:volt_guard/pages/notifications_page.dart';
 
-/// Dashboard page showing real-time energy usage, predictions, and alerts
-class DashboardPage extends StatelessWidget {
+class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
+
+  @override
+  State<DashboardPage> createState() => _DashboardPageState();
+}
+
+class _LiveState {
+  final Map<String, dynamic>? data;
+  final Set<String> highlightKeys;
+  _LiveState({this.data, this.highlightKeys = const {}});
+}
+
+class _DashboardPageState extends State<DashboardPage> {
+  bool _isLoading = true;
+  String? _error;
+
+  Map<String, dynamic> _todayEnergy = {};
+  Map<String, dynamic>? _totalBill;
+  Map<String, dynamic> _prediction = {};
+  List<dynamic> _anomalies = [];
+  List<dynamic> _recommendations = [];
+  List<dynamic> _devices = [];
+  Map<String, dynamic>? _topDevice;
+  String? _selectedDeviceId;
+  bool _isGeneratingReport = false;
+
+  // Live data: only these sections rebuild when this notifier updates (no full page refresh)
+  final ValueNotifier<_LiveState> _liveNotifier =
+      ValueNotifier<_LiveState>(_LiveState(data: null));
+  Timer? _highlightClearTimer;
+
+  // Chart & savings state
+  String _chartPeriod = 'day';
+  bool _isChartLoading = false;
+  Map<String, dynamic> _chartData = {};
+  Map<String, dynamic> _savingsData = {};
+  DateTime? _lastUpdated;
+  static const Duration _liveUpdateInterval = Duration(seconds: 5);
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboard();
+    _refreshTimer = Timer.periodic(_liveUpdateInterval, (_) {
+      if (mounted && !_isLoading) {
+        _loadLiveData();
+        _loadChartData(silent: true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _highlightClearTimer?.cancel();
+    _liveNotifier.dispose();
+    super.dispose();
+  }
+
+  Set<String> _computeLiveChangedKeys(
+      Map<String, dynamic>? oldData, Map<String, dynamic> newData) {
+    final keys = <String>{};
+    if (oldData == null) return keys;
+    final oldEnergy = oldData['today_energy'] as Map<String, dynamic>? ?? {};
+    final newEnergy = newData['today_energy'] as Map<String, dynamic>? ?? {};
+    final oldBill = oldData['total_bill'] as Map<String, dynamic>?;
+    final newBill = newData['total_bill'] as Map<String, dynamic>?;
+    if ((oldEnergy['total_kwh'] as num?)?.toDouble() !=
+        (newEnergy['total_kwh'] as num?)?.toDouble()) keys.add('total_kwh');
+    if ((oldEnergy['avg_power_w'] as num?)?.toDouble() !=
+        (newEnergy['avg_power_w'] as num?)?.toDouble()) keys.add('avg_power_w');
+    if ((oldEnergy['readings_count'] as num?)?.toInt() !=
+        (newEnergy['readings_count'] as num?)?.toInt())
+      keys.add('readings_count');
+    if ((oldBill?['total_bill_lkr'] as num?)?.toDouble() !=
+        (newBill?['total_bill_lkr'] as num?)?.toDouble())
+      keys.add('total_bill_lkr');
+    final oldDevices = oldData['devices'] as List<dynamic>? ?? [];
+    final newDevices = newData['devices'] as List<dynamic>? ?? [];
+    for (int i = 0; i < newDevices.length; i++) {
+      final nd = newDevices[i] as Map<String, dynamic>;
+      final id = nd['device_id'] as String? ?? '';
+      final newPower = (nd['current_power_w'] as num?)?.toDouble() ?? 0.0;
+      double oldPower = 0.0;
+      if (i < oldDevices.length) {
+        final od = oldDevices[i] as Map<String, dynamic>;
+        if (od['device_id'] == id)
+          oldPower = (od['current_power_w'] as num?)?.toDouble() ?? 0.0;
+      }
+      if (oldPower != newPower) keys.add('device:$id:power');
+    }
+    final oldTop = oldData['top_anomaly_device'] as Map<String, dynamic>?;
+    final newTop = newData['top_anomaly_device'] as Map<String, dynamic>?;
+    if (oldTop != null && newTop != null) {
+      if ((oldTop['current_power_w'] as num?)?.toDouble() !=
+          (newTop['current_power_w'] as num?)?.toDouble()) {
+        keys.add('top_anomaly_device');
+      }
+    } else if (oldTop != newTop) {
+      keys.add('top_anomaly_device');
+    }
+    return keys;
+  }
+
+  /// Live update: only update notifier so just live sections rebuild; highlight changed values.
+  Future<void> _loadLiveData() async {
+    try {
+      final data = await DashboardService.getLive();
+      if (!mounted) return;
+      _highlightClearTimer?.cancel();
+      final prev = _liveNotifier.value.data;
+      final newPayload = <String, dynamic>{
+        'today_energy': data['today_energy'] as Map<String, dynamic>? ?? {},
+        'total_bill': data['total_bill'] as Map<String, dynamic>?,
+        'devices': data['devices'] as List<dynamic>? ?? [],
+        'top_anomaly_device':
+            data['top_anomaly_device'] as Map<String, dynamic>?,
+        '_lastUpdated': DateTime.now(),
+      };
+      final highlightKeys = _computeLiveChangedKeys(prev, newPayload);
+      _liveNotifier.value =
+          _LiveState(data: newPayload, highlightKeys: highlightKeys);
+      _highlightClearTimer = Timer(const Duration(milliseconds: 2200), () {
+        if (!mounted) return;
+        _liveNotifier.value =
+            _LiveState(data: _liveNotifier.value.data, highlightKeys: {});
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadDashboard() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final data = await DashboardService.getSummary();
+      final devices = data['devices'] as List<dynamic>? ?? [];
+      setState(() {
+        _todayEnergy = data['today_energy'] as Map<String, dynamic>? ?? {};
+        _totalBill = data['total_bill'] as Map<String, dynamic>?;
+        _prediction = data['prediction'] as Map<String, dynamic>? ?? {};
+        _anomalies = data['anomalies'] as List<dynamic>? ?? [];
+        _recommendations = data['recommendations'] as List<dynamic>? ?? [];
+        _devices = devices;
+        _topDevice = data['top_anomaly_device'] as Map<String, dynamic>?;
+        _lastUpdated = DateTime.now();
+        _isLoading = false;
+        if (_selectedDeviceId == null && devices.isNotEmpty) {
+          final first = devices.first as Map<String, dynamic>;
+          _selectedDeviceId = first['device_id'] as String?;
+        }
+      });
+      _liveNotifier.value = _LiveState(
+        data: {
+          'today_energy': _todayEnergy,
+          'total_bill': _totalBill,
+          'devices': _devices,
+          'top_anomaly_device': _topDevice,
+          '_lastUpdated': _lastUpdated,
+        },
+      );
+      _loadChartData();
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// [silent] true when refreshing from live timer: no loading spinner, chart still updates with real data.
+  Future<void> _loadChartData({bool silent = false}) async {
+    if (!silent) setState(() => _isChartLoading = true);
+    try {
+      final results = await Future.wait([
+        DashboardService.getEnergyChart(_chartPeriod),
+        DashboardService.getSavings(_chartPeriod),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _chartData = results[0];
+        _savingsData = results[1];
+        _isChartLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      if (!silent) setState(() => _isChartLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -12,7 +211,6 @@ class DashboardPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Energy Dashboard'),
         actions: [
-          // Dark mode toggle
           Consumer<ThemeProvider>(
             builder: (context, themeProvider, _) {
               return IconButton(
@@ -29,66 +227,243 @@ class DashboardPage extends StatelessWidget {
               );
             },
           ),
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Notifications')),
-              );
-            },
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          NotificationsPage(anomalies: _anomalies),
+                    ),
+                  );
+                },
+              ),
+              if (_anomalies.isNotEmpty)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text(
+                      '${_anomalies.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await Future.delayed(const Duration(seconds: 1));
-        },
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16.0),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // Today's Energy Consumption
-              _buildSectionTitle(context, 'Today\'s Energy'),
-              const SizedBox(height: 12),
-              _buildTodayEnergyCard(context),
+              Icon(Icons.cloud_off,
+                  size: 64, color: Theme.of(context).colorScheme.error),
+              const SizedBox(height: 16),
+              Text('Failed to load dashboard',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Text(_error!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.6),
+                  )),
               const SizedBox(height: 24),
-
-              // Tomorrow's Predictions
-              _buildSectionTitle(context, 'Tomorrow\'s Prediction'),
-              const SizedBox(height: 12),
-              _buildTomorrowPredictionCard(context),
-              const SizedBox(height: 24),
-
-              // Active Device Anomalies
-              _buildSectionTitle(context, 'Active Anomalies'),
-              const SizedBox(height: 12),
-              _buildAnomaliesSection(context),
-              const SizedBox(height: 24),
-
-              // Energy-Saving Insights
-              _buildSectionTitle(context, 'Energy-Saving Insights'),
-              const SizedBox(height: 12),
-              _buildEnergySavingsCard(context),
-              const SizedBox(height: 24),
-
-              // Device-Wise Real-Time Usage
-              _buildSectionTitle(context, 'Real-Time Device Usage'),
-              const SizedBox(height: 12),
-              _buildDeviceUsageList(context),
-              const SizedBox(height: 24),
-
-              // Device Behavior Comparison
-              _buildSectionTitle(context, 'Device Behavior Comparison'),
-              const SizedBox(height: 12),
-              _buildDeviceBehaviorCard(context),
+              FilledButton.icon(
+                onPressed: _loadDashboard,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+              ),
             ],
           ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadLiveData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            RepaintBoundary(
+              child: ValueListenableBuilder<_LiveState>(
+                valueListenable: _liveNotifier,
+                builder: (context, live, _) {
+                  final lastUpdated =
+                      live.data != null && live.data!['_lastUpdated'] != null
+                          ? live.data!['_lastUpdated'] as DateTime
+                          : _lastUpdated;
+                  final todayEnergy =
+                      live.data?['today_energy'] as Map<String, dynamic>?;
+                  final totalBill =
+                      live.data?['total_bill'] as Map<String, dynamic>?;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (lastUpdated != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              Icon(Icons.update,
+                                  size: 14,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withOpacity(0.5)),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Live data • Last updated ${_formatLastUpdated(lastUpdated)}',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withOpacity(0.5)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      _buildSectionTitle(context, 'Today\'s Energy'),
+                      const SizedBox(height: 12),
+                      _buildTodayEnergyCard(
+                        context,
+                        todayEnergy: todayEnergy,
+                        totalBill: totalBill,
+                        highlightKeys: live.highlightKeys,
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 24),
+            _buildSectionTitle(context, 'Active Anomalies'),
+            const SizedBox(height: 12),
+            _buildAnomaliesSection(context),
+            const SizedBox(height: 24),
+            _buildSectionTitle(context, 'Energy Consumption'),
+            const SizedBox(height: 12),
+            _buildEnergyChartSection(context),
+            const SizedBox(height: 24),
+            _buildSectionTitle(context, 'Device Power Distribution'),
+            const SizedBox(height: 12),
+            RepaintBoundary(
+              child: ValueListenableBuilder<_LiveState>(
+                valueListenable: _liveNotifier,
+                builder: (context, live, _) => _buildDeviceDistributionChart(
+                  context,
+                  devices: live.data?['devices'] as List<dynamic>?,
+                  highlightKeys: live.highlightKeys,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            _buildSectionTitle(context, 'Real-Time Device Usage'),
+            const SizedBox(height: 12),
+            RepaintBoundary(
+              child: ValueListenableBuilder<_LiveState>(
+                valueListenable: _liveNotifier,
+                builder: (context, live, _) => _buildDeviceUsageList(
+                  context,
+                  devices: live.data?['devices'] as List<dynamic>?,
+                  highlightKeys: live.highlightKeys,
+                ),
+              ),
+            ),
+            RepaintBoundary(
+              child: ValueListenableBuilder<_LiveState>(
+                valueListenable: _liveNotifier,
+                builder: (context, live, _) {
+                  final top = live.data?['top_anomaly_device']
+                          as Map<String, dynamic>? ??
+                      _topDevice;
+                  if (top == null) return const SizedBox.shrink();
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(height: 24),
+                      _buildSectionTitle(context, 'Device Behavior Comparison'),
+                      const SizedBox(height: 12),
+                      _buildDeviceBehaviorCard(
+                        context,
+                        topDevice: top,
+                        highlightKeys: live.highlightKeys,
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
+
+  // ── Highlight when value changes (live update) ─────────────────────────
+
+  Widget _highlightableValue({
+    required BuildContext context,
+    required String highlightKey,
+    required Set<String> highlightKeys,
+    required Widget child,
+  }) {
+    final isHighlight = highlightKeys.contains(highlightKey);
+    if (!isHighlight) return child;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 1.0, end: 0.0),
+      duration: const Duration(milliseconds: 2000),
+      curve: Curves.easeOut,
+      builder: (context, value, child) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.green.withOpacity(0.15 * value),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          child: child,
+        );
+      },
+      child: child,
+    );
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────
 
   Widget _buildSectionTitle(BuildContext context, String title) {
     return Text(
@@ -99,7 +474,300 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
-  Widget _buildTodayEnergyCard(BuildContext context) {
+  String _formatLastUpdated(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _formatPower(double watts) {
+    if (watts >= 1000) {
+      return '${(watts / 1000).toStringAsFixed(1)} kW';
+    }
+    return '${watts.toStringAsFixed(0)} W';
+  }
+
+  String _convertUtcHourRangeToSriLanka(String value) {
+    if (value.trim().isEmpty || value == 'N/A') return value;
+
+    final regex = RegExp(
+      r'^\s*(\d{1,2})\s*(AM|PM)\s*-\s*(\d{1,2})\s*(AM|PM)\s*$',
+      caseSensitive: false,
+    );
+    final match = regex.firstMatch(value);
+    if (match == null) return value;
+
+    int toMinutes(String hourText, String amPmText) {
+      int hour = int.tryParse(hourText) ?? 0;
+      final amPm = amPmText.toUpperCase();
+      if (hour == 12) {
+        hour = 0;
+      }
+      if (amPm == 'PM') {
+        hour += 12;
+      }
+      return hour * 60;
+    }
+
+    String to12HourLabel(int totalMinutes) {
+      final normalized = ((totalMinutes % 1440) + 1440) % 1440;
+      final hour24 = normalized ~/ 60;
+      final minute = normalized % 60;
+      final isPm = hour24 >= 12;
+      final hour12Raw = hour24 % 12;
+      final hour12 = hour12Raw == 0 ? 12 : hour12Raw;
+      final amPm = isPm ? 'PM' : 'AM';
+
+      if (minute == 0) {
+        return '$hour12 $amPm';
+      }
+      return '$hour12:${minute.toString().padLeft(2, '0')} $amPm';
+    }
+
+    final startUtcMins = toMinutes(match.group(1)!, match.group(2)!);
+    final endUtcMins = toMinutes(match.group(3)!, match.group(4)!);
+
+    const sriLankaOffsetMinutes = 5 * 60 + 30;
+    final startLkMins = startUtcMins + sriLankaOffsetMinutes;
+    final endLkMins = endUtcMins + sriLankaOffsetMinutes;
+
+    return '${to12HourLabel(startLkMins)} - ${to12HourLabel(endLkMins)}';
+  }
+
+  double _calculateTariffCostLkr(double kwh, {double billingDays = 30}) {
+    if (kwh <= 0 || billingDays <= 0) return 0.0;
+
+    final factor = billingDays / 30.0;
+
+    // Domestic low users (<= 60 units/month, prorated by billing days)
+    final low30Limit = 30.0 * factor;
+    final low60Limit = 60.0 * factor;
+
+    if (kwh <= low60Limit) {
+      final units0to30 = min(kwh, low30Limit);
+      final units31to60 = max(kwh - low30Limit, 0.0);
+
+      final energyCost = (units0to30 * 4.50) + (units31to60 * 8.00);
+      final fixedCharge = (kwh <= low30Limit ? 80.0 : 210.0) * factor;
+      return energyCost + fixedCharge;
+    }
+
+    // Domestic users > 60 units/month (prorated blocks)
+    double remaining = kwh;
+    double energyCost = 0.0;
+
+    final highBlocks = <(double, double)>[
+      (60.0 * factor, 12.75),
+      (30.0 * factor, 18.50),
+      (30.0 * factor, 24.00),
+      (60.0 * factor, 41.00),
+    ];
+
+    for (final (blockSize, rate) in highBlocks) {
+      if (remaining <= 0) break;
+      final units = min(remaining, blockSize);
+      energyCost += units * rate;
+      remaining -= units;
+    }
+
+    if (remaining > 0) {
+      energyCost += remaining * 61.00;
+    }
+
+    final high60Limit = 60.0 * factor;
+    final high90Limit = 90.0 * factor;
+    final high180Limit = 180.0 * factor;
+    final fixedCharge = kwh <= high60Limit
+        ? 0.0 * factor
+        : kwh <= high90Limit
+            ? 400.0 * factor
+            : kwh <= high180Limit
+                ? (kwh <= 120.0 * factor ? 1000.0 * factor : 1500.0 * factor)
+                : 2100.0 * factor;
+
+    return energyCost + fixedCharge;
+  }
+
+  String _simpleTariffCalculation(double kwh, {double billingDays = 30}) {
+    if (kwh <= 0 || billingDays <= 0) {
+      return 'For 0.00 kWh\nEnergy: Rs. 0.00\nFixed: Rs. 0.00\nTotal Bill: Rs. 0.00';
+    }
+
+    final factor = billingDays / 30.0;
+    final low30Limit = 30.0 * factor;
+    final low60Limit = 60.0 * factor;
+
+    double energyCost = 0.0;
+    double fixedCharge = 0.0;
+    double fixedBase = 0.0;
+    final energyTerms = <String>[];
+
+    if (kwh <= low60Limit) {
+      final units0to30 = min(kwh, low30Limit);
+      final units31to60 = max(kwh - low30Limit, 0.0);
+
+      if (units0to30 > 0) {
+        energyTerms.add('${units0to30.toStringAsFixed(2)}×4.50');
+      }
+      if (units31to60 > 0) {
+        energyTerms.add('${units31to60.toStringAsFixed(2)}×8.00');
+      }
+
+      energyCost = (units0to30 * 4.50) + (units31to60 * 8.00);
+      fixedBase = kwh <= low30Limit ? 80.0 : 210.0;
+      fixedCharge = fixedBase * factor;
+    } else {
+      double remaining = kwh;
+      final b1 = min(remaining, 60.0 * factor);
+      energyCost += b1 * 12.75;
+      if (b1 > 0) {
+        energyTerms.add('${b1.toStringAsFixed(2)}×12.75');
+      }
+      remaining -= b1;
+
+      final b2 = min(max(remaining, 0.0), 30.0 * factor);
+      energyCost += b2 * 18.50;
+      if (b2 > 0) {
+        energyTerms.add('${b2.toStringAsFixed(2)}×18.50');
+      }
+      remaining -= b2;
+
+      final b3 = min(max(remaining, 0.0), 30.0 * factor);
+      energyCost += b3 * 24.00;
+      if (b3 > 0) {
+        energyTerms.add('${b3.toStringAsFixed(2)}×24.00');
+      }
+      remaining -= b3;
+
+      final b4 = min(max(remaining, 0.0), 60.0 * factor);
+      energyCost += b4 * 41.00;
+      if (b4 > 0) {
+        energyTerms.add('${b4.toStringAsFixed(2)}×41.00');
+      }
+      remaining -= b4;
+
+      if (remaining > 0) {
+        energyCost += remaining * 61.00;
+        energyTerms.add('${remaining.toStringAsFixed(2)}×61.00');
+      }
+
+      if (kwh <= 90.0 * factor) {
+        fixedBase = 400.0;
+      } else if (kwh <= 120.0 * factor) {
+        fixedBase = 1000.0;
+      } else if (kwh <= 180.0 * factor) {
+        fixedBase = 1500.0;
+      } else {
+        fixedBase = 2100.0;
+      }
+
+      fixedCharge = fixedBase * factor;
+    }
+
+    final total = energyCost + fixedCharge;
+    final energyExpr =
+        energyTerms.isNotEmpty ? energyTerms.join(' + ') : '0.00';
+
+    return 'For ${kwh.toStringAsFixed(2)} kWh\n'
+        'Energy: $energyExpr = Rs. ${energyCost.toStringAsFixed(2)}\n'
+        'Fixed: Rs. ${fixedBase.toStringAsFixed(0)} × (${billingDays.toStringAsFixed(0)}/30) = Rs. ${fixedCharge.toStringAsFixed(2)}\n'
+        'Total Bill: Rs. ${total.toStringAsFixed(2)}';
+  }
+
+  String _tariffTierLabel(double kwh, {double billingDays = 30}) {
+    final factor = billingDays > 0 ? (billingDays / 30.0) : 1.0;
+
+    if (kwh <= 30.0 * factor) return '0-30';
+    if (kwh <= 60.0 * factor) return '31-60';
+    if (kwh <= 90.0 * factor) return '61-90';
+    if (kwh <= 120.0 * factor) return '91-120';
+    if (kwh <= 180.0 * factor) return '121-180';
+    return '>180';
+  }
+
+  IconData _deviceIcon(String? type) {
+    switch (type?.toLowerCase()) {
+      case 'ac':
+      case 'air conditioner':
+        return Icons.ac_unit;
+      case 'refrigerator':
+      case 'fridge':
+        return Icons.kitchen;
+      case 'water heater':
+      case 'heater':
+        return Icons.water_drop;
+      case 'washing machine':
+        return Icons.local_laundry_service;
+      case 'light':
+      case 'lighting':
+        return Icons.lightbulb;
+      case 'fan':
+        return Icons.air;
+      default:
+        return Icons.electrical_services;
+    }
+  }
+
+  Color _deviceColor(String? type) {
+    switch (type?.toLowerCase()) {
+      case 'ac':
+      case 'air conditioner':
+        return Colors.blue;
+      case 'refrigerator':
+      case 'fridge':
+        return Colors.green;
+      case 'water heater':
+      case 'heater':
+        return Colors.orange;
+      case 'washing machine':
+        return Colors.teal;
+      case 'light':
+      case 'lighting':
+        return Colors.amber;
+      case 'fan':
+        return Colors.cyan;
+      default:
+        return Colors.purple;
+    }
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'High':
+        return Colors.red;
+      case 'Medium':
+        return Colors.orange;
+      case 'Normal':
+        return Colors.green;
+      case 'Low':
+        return Colors.blue;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // ── Today's Energy Card ──────────────────────────────────────────────
+
+  Widget _buildTodayEnergyCard(
+    BuildContext context, {
+    Map<String, dynamic>? todayEnergy,
+    Map<String, dynamic>? totalBill,
+    Set<String> highlightKeys = const {},
+  }) {
+    final te = todayEnergy ?? _todayEnergy;
+    final tb = totalBill ?? _totalBill;
+    final totalKwh = (te['total_kwh'] as num?)?.toDouble() ?? 0.0;
+    final cost = (tb != null && tb['total_bill_lkr'] != null)
+        ? (tb['total_bill_lkr'] as num).toDouble()
+        : _calculateTariffCostLkr(totalKwh, billingDays: 1);
+    final peakHourUtc = te['peak_hour'] as String? ?? 'N/A';
+    final peakHour = _convertUtcHourRangeToSriLanka(peakHourUtc);
+    final avgPower = (te['avg_power_w'] as num?)?.toDouble() ?? 0.0;
+    final readingsCount = (te['readings_count'] as num?)?.toInt() ?? 0;
+    final billFormula = _simpleTariffCalculation(totalKwh, billingDays: 1);
+
     return Card(
       elevation: 2,
       child: Padding(
@@ -123,12 +791,36 @@ class DashboardPage extends StatelessWidget {
                             .withOpacity(0.6),
                       ),
                     ),
+                    if (readingsCount > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: _highlightableValue(
+                          context: context,
+                          highlightKey: 'readings_count',
+                          highlightKeys: highlightKeys,
+                          child: Text(
+                            'From database • $readingsCount readings',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withOpacity(0.8),
+                            ),
+                          ),
+                        ),
+                      ),
                     const SizedBox(height: 4),
-                    const Text(
-                      '24.8 kWh',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
+                    _highlightableValue(
+                      context: context,
+                      highlightKey: 'total_kwh',
+                      highlightKeys: highlightKeys,
+                      child: Text(
+                        '${totalKwh.toStringAsFixed(2)} kWh',
+                        style: const TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -153,21 +845,89 @@ class DashboardPage extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                _highlightableValue(
+                  context: context,
+                  highlightKey: 'total_bill_lkr',
+                  highlightKeys: highlightKeys,
+                  child: _buildQuickStat(
+                    context,
+                    'Estimated Cost',
+                    'Rs. ${cost.toStringAsFixed(2)}',
+                    Colors.green,
+                  ),
+                ),
+                Container(
+                  height: 40,
+                  width: 1,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
                 _buildQuickStat(
-                    context, 'Estimated Cost', '\$6.82', Colors.green),
+                  context,
+                  'Peak Hour',
+                  peakHour,
+                  Colors.orange,
+                  flex: 1,
+                  valueFontSize: 17,
+                  valueMaxLines: 2,
+                ),
                 Container(
                   height: 40,
                   width: 1,
                   color: Theme.of(context).colorScheme.outlineVariant,
                 ),
-                _buildQuickStat(context, 'Peak Hour', '7-9 PM', Colors.orange),
-                Container(
-                  height: 40,
-                  width: 1,
-                  color: Theme.of(context).colorScheme.outlineVariant,
+                _highlightableValue(
+                  context: context,
+                  highlightKey: 'avg_power_w',
+                  highlightKeys: highlightKeys,
+                  child: _buildQuickStat(
+                    context,
+                    'Avg. Power',
+                    _formatPower(avgPower),
+                    Colors.purple,
+                  ),
                 ),
-                _buildQuickStat(context, 'Avg. Power', '2.8 kW', Colors.purple),
               ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                billFormula,
+                style: TextStyle(
+                  fontSize: 12,
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withOpacity(0.75),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed:
+                    _isGeneratingReport ? null : _generateAndDownloadReport,
+                icon: _isGeneratingReport
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.picture_as_pdf_outlined, size: 22),
+                label: Text(_isGeneratingReport
+                    ? 'Generating…'
+                    : 'Generate report (PDF)'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
             ),
           ],
         ),
@@ -175,15 +935,210 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
+  Future<void> _generateAndDownloadReport() async {
+    setState(() => _isGeneratingReport = true);
+    try {
+      final totalKwh = (_todayEnergy['total_kwh'] as num?)?.toDouble() ?? 0.0;
+      final cost = (_totalBill != null && _totalBill!['total_bill_lkr'] != null)
+          ? (_totalBill!['total_bill_lkr'] as num).toDouble()
+          : _calculateTariffCostLkr(totalKwh, billingDays: 1);
+      final peakHour = _todayEnergy['peak_hour'] as String? ?? 'N/A';
+      final avgPower = (_todayEnergy['avg_power_w'] as num?)?.toDouble() ?? 0.0;
+      final readingsCount =
+          (_todayEnergy['readings_count'] as num?)?.toInt() ?? 0;
+      final billDate = _totalBill?['date'] as String? ??
+          DateTime.now().toUtc().toIso8601String().split('T').first;
+      final reportDate = DateTime.now().toIso8601String();
+
+      final pdf = pw.Document();
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(24),
+          build: (pw.Context context) => [
+            pw.Text(
+              'Volt Guard',
+              style: pw.TextStyle(
+                fontSize: 22,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 8),
+            pw.Text(
+              'Consumption & Bill Report',
+              style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              'Generated: $reportDate',
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+            pw.SizedBox(height: 20),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(12),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey400),
+                borderRadius: pw.BorderRadius.circular(8),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('Report period (day)',
+                      style:
+                          pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(billDate,
+                      style: pw.TextStyle(
+                          fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 16),
+            pw.Table(
+              border: pw.TableBorder.all(color: PdfColors.grey300),
+              children: [
+                pw.TableRow(
+                  decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Metric',
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Value',
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Total consumption'),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('${totalKwh.toStringAsFixed(2)} kWh'),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Total bill (estimated)'),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Rs. ${cost.toStringAsFixed(2)}'),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Peak hour'),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text(peakHour),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Average power'),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text(_formatPower(avgPower)),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Readings count'),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('$readingsCount'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 16),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(10),
+              color: PdfColors.grey100,
+              child: pw.Text(
+                _simpleTariffCalculation(totalKwh, billingDays: 1),
+                style: const pw.TextStyle(fontSize: 9),
+              ),
+            ),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'This report is generated by Volt Guard. Values are based on energy readings and CEB domestic tariff.',
+              style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+            ),
+          ],
+        ),
+      );
+
+      final bytes = await pdf.save();
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'volt_guard_report_$billDate.pdf',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Report saved. Use Share to save or print.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to generate report: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isGeneratingReport = false);
+    }
+  }
+
   Widget _buildQuickStat(
-      BuildContext context, String label, String value, Color color) {
+    BuildContext context,
+    String label,
+    String value,
+    Color color, {
+    int flex = 1,
+    double valueFontSize = 18,
+    int valueMaxLines = 1,
+  }) {
     return Expanded(
+      flex: flex,
       child: Column(
         children: [
           Text(
             value,
+            textAlign: TextAlign.center,
+            maxLines: valueMaxLines,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 18,
+              fontSize: valueFontSize,
               fontWeight: FontWeight.bold,
               color: color,
             ),
@@ -202,7 +1157,44 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
+  // ── Tomorrow's Prediction Card ───────────────────────────────────────
+
   Widget _buildTomorrowPredictionCard(BuildContext context) {
+    final predictedKwh =
+        (_prediction['total_predicted_kwh'] as num?)?.toDouble() ?? 0.0;
+    final cost = _calculateTariffCostLkr(predictedKwh, billingDays: 1);
+    final changePercent =
+        (_prediction['change_percent'] as num?)?.toDouble() ?? 0.0;
+    final confidence =
+        (_prediction['avg_confidence'] as num?)?.toDouble() ?? 0.0;
+
+    final isIncrease = changePercent > 0;
+    final changeColor =
+        isIncrease ? Theme.of(context).colorScheme.error : Colors.green;
+    final changeIcon = isIncrease ? Icons.trending_up : Icons.trending_down;
+    final changeText = isIncrease
+        ? '+${changePercent.toStringAsFixed(1)}% from today'
+        : '${changePercent.toStringAsFixed(1)}% from today';
+
+    if (predictedKwh == 0 && confidence == 0) {
+      return Card(
+        elevation: 2,
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Row(
+            children: [
+              Icon(Icons.lightbulb_outline,
+                  color: Theme.of(context).colorScheme.tertiary),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text('No predictions available yet.'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Card(
       elevation: 2,
       child: Padding(
@@ -242,9 +1234,9 @@ class DashboardPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      '26.3 kWh',
-                      style: TextStyle(
+                    Text(
+                      '${predictedKwh.toStringAsFixed(1)} kWh',
+                      style: const TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
                         color: Colors.blue,
@@ -253,15 +1245,13 @@ class DashboardPage extends StatelessWidget {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Icon(Icons.trending_up,
-                            size: 16,
-                            color: Theme.of(context).colorScheme.error),
+                        Icon(changeIcon, size: 16, color: changeColor),
                         const SizedBox(width: 4),
                         Text(
-                          '+6% from today',
+                          changeText,
                           style: TextStyle(
                             fontSize: 12,
-                            color: Theme.of(context).colorScheme.error,
+                            color: changeColor,
                           ),
                         ),
                       ],
@@ -282,9 +1272,9 @@ class DashboardPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      '\$7.24',
-                      style: TextStyle(
+                    Text(
+                      'Rs. ${cost.toStringAsFixed(2)}',
+                      style: const TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
                         color: Colors.green,
@@ -303,13 +1293,13 @@ class DashboardPage extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.schedule,
+                  Icon(Icons.verified,
                       color: Theme.of(context).colorScheme.onTertiaryContainer,
                       size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Peak hours expected: 6 PM - 10 PM',
+                      'Confidence: ${(confidence * 100).toStringAsFixed(0)}%',
                       style: TextStyle(
                         fontSize: 13,
                         color:
@@ -327,99 +1317,973 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
+  // ── Active Anomalies ─────────────────────────────────────────────────
+
   Widget _buildAnomaliesSection(BuildContext context) {
+    final count = _anomalies.length;
+
+    // Count by severity
+    int high = 0, medium = 0, low = 0;
+    for (final a in _anomalies) {
+      final map = a as Map<String, dynamic>;
+      switch ((map['severity'] as String? ?? '').toLowerCase()) {
+        case 'critical':
+        case 'high':
+          high++;
+          break;
+        case 'medium':
+          medium++;
+          break;
+        default:
+          low++;
+      }
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const AnomaliesPage()),
+        );
+      },
+      child: Card(
+        elevation: 2,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: count > 0
+                      ? Colors.red.withOpacity(0.1)
+                      : Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  count > 0 ? Icons.warning_amber_rounded : Icons.check_circle,
+                  color: count > 0 ? Colors.red : Colors.green,
+                  size: 32,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      count == 0
+                          ? 'No Active Anomalies'
+                          : '$count Active Anomal${count == 1 ? 'y' : 'ies'}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (count > 0) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          if (high > 0)
+                            _buildSeverityChip('High', high, Colors.red),
+                          if (high > 0 && medium > 0) const SizedBox(width: 8),
+                          if (medium > 0)
+                            _buildSeverityChip('Medium', medium, Colors.orange),
+                          if ((high > 0 || medium > 0) && low > 0)
+                            const SizedBox(width: 8),
+                          if (low > 0)
+                            _buildSeverityChip(
+                                'Low', low, Colors.yellow.shade700),
+                        ],
+                      ),
+                    ] else
+                      Text(
+                        'All devices operating normally.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(0.6),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right,
+                  color: Theme.of(context).colorScheme.outline),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSeverityChip(String label, int count, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '$count $label',
+        style: TextStyle(
+          fontSize: 12,
+          color: color,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  // ── Energy Consumption Chart (Gradient Area) ────────────────────────
+
+  Widget _buildEnergyChartSection(BuildContext context) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header row
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(Icons.show_chart,
+                          color: Theme.of(context).colorScheme.primary,
+                          size: 20),
+                    ),
+                    const SizedBox(width: 10),
+                    const Text(
+                      'Consumption',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                // Period chips
+                Container(
+                  decoration: BoxDecoration(
+                    color:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: ['day', 'week', 'month'].map((p) {
+                      final selected = _chartPeriod == p;
+                      final label =
+                          p[0].toUpperCase() + p.substring(1); // Day/Week/Month
+                      return GestureDetector(
+                        onTap: () {
+                          setState(() => _chartPeriod = p);
+                          _loadChartData();
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            label,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: selected
+                                  ? Theme.of(context).colorScheme.onPrimary
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withOpacity(0.6),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            // Chart
+            _isChartLoading
+                ? const SizedBox(
+                    height: 200,
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                : _buildAreaChart(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAreaChart(BuildContext context) {
+    final points = _chartData['points'] as List<dynamic>? ?? [];
+    if (points.isEmpty) {
+      return const SizedBox(
+        height: 200,
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'No consumption data for this period. Data comes from your energy readings. Pull to refresh.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final totalActual =
+        (_chartData['total_actual_kwh'] as num?)?.toDouble() ?? 0.0;
+    final totalBaseline =
+        (_chartData['total_baseline_kwh'] as num?)?.toDouble() ?? 0.0;
+
+    // Build spots
+    final actualSpots = <FlSpot>[];
+    final baselineSpots = <FlSpot>[];
+    double maxY = 0;
+    for (int i = 0; i < points.length; i++) {
+      final p = points[i] as Map<String, dynamic>;
+      final actual = (p['actual_kwh'] as num?)?.toDouble() ?? 0.0;
+      final baseline = (p['baseline_kwh'] as num?)?.toDouble() ?? 0.0;
+      maxY = max(maxY, max(actual, baseline));
+      actualSpots.add(FlSpot(i.toDouble(), actual));
+      baselineSpots.add(FlSpot(i.toDouble(), baseline));
+    }
+    maxY = maxY > 0 ? maxY * 1.25 : 1.0;
+
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
     return Column(
       children: [
-        _buildAnomalyCard(
-          'Air Conditioner',
-          'Unusual high consumption detected',
-          'High',
-          Colors.red,
-          Icons.ac_unit,
-          '45% above normal',
+        // Summary chips
+        Row(
+          children: [
+            _buildChartSummaryChip(
+              context,
+              'Actual',
+              '${totalActual.toStringAsFixed(2)} kWh',
+              primaryColor,
+            ),
+            const SizedBox(width: 8),
+            _buildChartSummaryChip(
+              context,
+              'Baseline',
+              '${totalBaseline.toStringAsFixed(2)} kWh',
+              Colors.orange,
+            ),
+          ],
         ),
-        const SizedBox(height: 12),
-        _buildAnomalyCard(
-          'Refrigerator',
-          'Temperature fluctuation detected',
-          'Medium',
-          Colors.orange,
-          Icons.kitchen,
-          '12% above normal',
-        ),
-        const SizedBox(height: 12),
-        _buildAnomalyCard(
-          'Water Heater',
-          'Extended heating cycle',
-          'Low',
-          Colors.yellow[700]!,
-          Icons.water_drop,
-          '8% above normal',
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 200,
+          child: LineChart(
+            LineChartData(
+              maxY: maxY,
+              minY: 0,
+              clipData: const FlClipData.all(),
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                horizontalInterval: maxY / 4,
+                getDrawingHorizontalLine: (value) => FlLine(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .outlineVariant
+                      .withOpacity(0.3),
+                  strokeWidth: 1,
+                  dashArray: [5, 5],
+                ),
+              ),
+              titlesData: FlTitlesData(
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 40,
+                    getTitlesWidget: (value, meta) {
+                      if (value == meta.max || value == meta.min) {
+                        return const SizedBox.shrink();
+                      }
+                      return Text(
+                        value.toStringAsFixed(1),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(0.4),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 28,
+                    interval: 1,
+                    getTitlesWidget: (value, meta) {
+                      final idx = value.toInt();
+                      if (idx < 0 || idx >= points.length) {
+                        return const SizedBox.shrink();
+                      }
+                      final step = _chartPeriod == 'day'
+                          ? 4
+                          : (_chartPeriod == 'month' ? 5 : 1);
+                      if (idx % step != 0) return const SizedBox.shrink();
+                      final p = points[idx] as Map<String, dynamic>;
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          p['label'] as String? ?? '',
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withOpacity(0.5),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                topTitles:
+                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles:
+                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              ),
+              borderData: FlBorderData(show: false),
+              lineTouchData: LineTouchData(
+                touchTooltipData: LineTouchTooltipData(
+                  tooltipRoundedRadius: 12,
+                  getTooltipItems: (touchedSpots) {
+                    return touchedSpots.map((spot) {
+                      final isActual = spot.barIndex == 0;
+                      return LineTooltipItem(
+                        '${isActual ? "Actual" : "Baseline"}\n${spot.y.toStringAsFixed(3)} kWh',
+                        TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          height: 1.4,
+                        ),
+                      );
+                    }).toList();
+                  },
+                ),
+                handleBuiltInTouches: true,
+              ),
+              lineBarsData: [
+                // Actual — gradient area
+                LineChartBarData(
+                  spots: actualSpots,
+                  isCurved: true,
+                  curveSmoothness: 0.3,
+                  color: primaryColor,
+                  barWidth: 3,
+                  isStrokeCapRound: true,
+                  dotData: FlDotData(
+                    show: _chartPeriod != 'day',
+                    getDotPainter: (spot, pct, bar, idx) => FlDotCirclePainter(
+                      radius: 3,
+                      color: primaryColor,
+                      strokeWidth: 2,
+                      strokeColor: Colors.white,
+                    ),
+                  ),
+                  belowBarData: BarAreaData(
+                    show: true,
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        primaryColor.withOpacity(0.3),
+                        primaryColor.withOpacity(0.0),
+                      ],
+                    ),
+                  ),
+                ),
+                // Baseline — dashed line
+                LineChartBarData(
+                  spots: baselineSpots,
+                  isCurved: true,
+                  curveSmoothness: 0.3,
+                  color: Colors.orange.shade400,
+                  barWidth: 2,
+                  isStrokeCapRound: true,
+                  dashArray: [8, 4],
+                  dotData: const FlDotData(show: false),
+                  belowBarData: BarAreaData(show: false),
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildAnomalyCard(
-    String device,
-    String issue,
-    String severity,
-    Color severityColor,
-    IconData icon,
-    String impact,
-  ) {
-    return Card(
-      elevation: 1,
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: severityColor.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, color: severityColor, size: 24),
+  Widget _buildChartSummaryChip(
+      BuildContext context, String label, String value, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.2)),
         ),
-        title: Text(
-          device,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            const SizedBox(height: 4),
-            Text(issue),
-            const SizedBox(height: 4),
-            Text(
-              impact,
-              style: TextStyle(
-                fontSize: 12,
-                color: severityColor,
-                fontWeight: FontWeight.w500,
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
               ),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.5))),
+                Text(value,
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: color)),
+              ],
             ),
           ],
         ),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: severityColor,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            severity,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        isThreeLine: true,
       ),
     );
   }
 
-  Widget _buildEnergySavingsCard(BuildContext context) {
+  // ── Energy Savings Card (with radial gauge) ─────────────────────────
+
+  Widget _buildSavingsCard(BuildContext context) {
+    if (_isChartLoading) {
+      return const Card(
+        elevation: 2,
+        child: SizedBox(
+          height: 120,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    final baselineKwh =
+        (_savingsData['baseline_kwh'] as num?)?.toDouble() ?? 0.0;
+    final actualKwh = (_savingsData['actual_kwh'] as num?)?.toDouble() ?? 0.0;
+    final days = (_savingsData['days'] as num?)?.toDouble() ??
+        (_chartPeriod == 'week'
+            ? 7.0
+            : _chartPeriod == 'month'
+                ? 30.0
+                : 1.0);
+    final savedKwh = (_savingsData['saved_kwh'] as num?)?.toDouble() ??
+        max(baselineKwh - actualKwh, 0.0);
+    final savingsPct =
+        (_savingsData['savings_percent'] as num?)?.toDouble() ?? 0.0;
+    final baselineLkr = _calculateTariffCostLkr(baselineKwh, billingDays: days);
+    final actualLkr = _calculateTariffCostLkr(actualKwh, billingDays: days);
+    final savedLkr = max(baselineLkr - actualLkr, 0.0);
+    final tariffTier = _tariffTierLabel(actualKwh, billingDays: days);
+
+    final hasSavings = savedKwh > 0;
+    final gaugeColor = hasSavings ? Colors.green : Colors.orange;
+    final noBaseline = baselineKwh <= 0;
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (noBaseline)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Baseline is computed from registered devices. Add devices with rated power to see savings vs actual consumption.',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.6)),
+                ),
+              ),
+            // Radial gauge + money saved
+            Row(
+              children: [
+                // Gauge
+                SizedBox(
+                  width: 120,
+                  height: 120,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: 110,
+                        height: 110,
+                        child: CircularProgressIndicator(
+                          value: (savingsPct / 100).clamp(0.0, 1.0),
+                          strokeWidth: 10,
+                          strokeCap: StrokeCap.round,
+                          backgroundColor: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
+                          valueColor: AlwaysStoppedAnimation<Color>(gaugeColor),
+                        ),
+                      ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${savingsPct.toStringAsFixed(1)}%',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: gaugeColor,
+                            ),
+                          ),
+                          Text(
+                            'saved',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withOpacity(0.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 20),
+                // Savings details
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        hasSavings ? 'Great job!' : 'Savings Overview',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _buildSavingsRow(
+                        context,
+                        Icons.bolt,
+                        'Energy saved',
+                        '${savedKwh.toStringAsFixed(2)} kWh',
+                        gaugeColor,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildSavingsRow(
+                        context,
+                        Icons.account_balance_wallet,
+                        'Money saved',
+                        'Rs. ${savedLkr.toStringAsFixed(0)}',
+                        gaugeColor,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            // Baseline vs actual horizontal bar comparison
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  _buildComparisonBar(
+                    context,
+                    'Without Volt Guard',
+                    baselineKwh,
+                    baselineKwh,
+                    Colors.red.shade400,
+                    'Rs. ${baselineLkr.toStringAsFixed(0)}',
+                  ),
+                  const SizedBox(height: 12),
+                  _buildComparisonBar(
+                    context,
+                    'With Volt Guard',
+                    actualKwh,
+                    baselineKwh,
+                    Colors.green,
+                    'Rs. ${actualLkr.toStringAsFixed(0)}',
+                  ),
+                ],
+              ),
+            ),
+            if (tariffTier.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.tertiaryContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.receipt_long,
+                        size: 16,
+                        color:
+                            Theme.of(context).colorScheme.onTertiaryContainer),
+                    const SizedBox(width: 8),
+                    Text(
+                      'CEB Tariff Tier: $tariffTier units/month',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color:
+                            Theme.of(context).colorScheme.onTertiaryContainer,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSavingsRow(BuildContext context, IconData icon, String label,
+      String value, Color color) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 8),
+        Text(label,
+            style: TextStyle(
+                fontSize: 12,
+                color:
+                    Theme.of(context).colorScheme.onSurface.withOpacity(0.6))),
+        const Spacer(),
+        Text(value,
+            style: TextStyle(
+                fontSize: 14, fontWeight: FontWeight.bold, color: color)),
+      ],
+    );
+  }
+
+  Widget _buildComparisonBar(BuildContext context, String label, double value,
+      double maxVal, Color color, String costLabel) {
+    final pct = maxVal > 0 ? (value / maxVal).clamp(0.0, 1.0) : 0.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.7))),
+            Text(costLabel,
+                style: TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.bold, color: color)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Stack(
+          children: [
+            Container(
+              height: 10,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(5),
+              ),
+            ),
+            FractionallySizedBox(
+              widthFactor: pct,
+              child: Container(
+                height: 10,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [color.withOpacity(0.7), color],
+                  ),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text('${value.toStringAsFixed(2)} kWh',
+            style: TextStyle(
+                fontSize: 10,
+                color:
+                    Theme.of(context).colorScheme.onSurface.withOpacity(0.4))),
+      ],
+    );
+  }
+
+  // ── Device Power Distribution (Donut Chart) ─────────────────────────
+
+  static const List<Color> _donutColors = [
+    Color(0xFF2196F3), // blue
+    Color(0xFF4CAF50), // green
+    Color(0xFFFF9800), // orange
+    Color(0xFF9C27B0), // purple
+    Color(0xFF00BCD4), // cyan
+    Color(0xFFF44336), // red
+    Color(0xFFFFEB3B), // yellow
+    Color(0xFF795548), // brown
+  ];
+
+  Widget _buildDeviceDistributionChart(
+    BuildContext context, {
+    List<dynamic>? devices,
+    Set<String> highlightKeys = const {},
+  }) {
+    final devs = devices ?? _devices;
+    // Filter devices with power > 0
+    final activeDevices = devs
+        .map((d) => d as Map<String, dynamic>)
+        .where((d) => ((d['current_power_w'] as num?)?.toDouble() ?? 0.0) > 0)
+        .toList();
+
+    if (activeDevices.isEmpty) {
+      return Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: SizedBox(
+            height: 80,
+            child: Center(
+              child: Text(
+                devs.isEmpty
+                    ? 'No devices registered. Add devices to see power distribution.'
+                    : 'No active devices right now. Distribution updates from live device usage.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withOpacity(0.7)),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final totalPower = activeDevices.fold<double>(
+        0, (sum, d) => sum + ((d['current_power_w'] as num?)?.toDouble() ?? 0));
+
+    // Build pie sections
+    final sections = <PieChartSectionData>[];
+    for (int i = 0; i < activeDevices.length; i++) {
+      final d = activeDevices[i];
+      final power = (d['current_power_w'] as num?)?.toDouble() ?? 0.0;
+      final pct = totalPower > 0 ? (power / totalPower * 100) : 0.0;
+      final color = _donutColors[i % _donutColors.length];
+      sections.add(
+        PieChartSectionData(
+          value: power,
+          color: color,
+          radius: 28,
+          title: pct >= 8 ? '${pct.toStringAsFixed(0)}%' : '',
+          titleStyle: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            // Donut
+            SizedBox(
+              width: 140,
+              height: 140,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  PieChart(
+                    PieChartData(
+                      sections: sections,
+                      centerSpaceRadius: 38,
+                      sectionsSpace: 2,
+                      startDegreeOffset: -90,
+                    ),
+                  ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _formatPower(totalPower),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        'Total',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(0.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            // Legend
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: List.generate(
+                  activeDevices.length > 5 ? 5 : activeDevices.length,
+                  (i) {
+                    final d = activeDevices[i];
+                    final id = d['device_id'] as String? ?? '';
+                    final name = d['device_name'] as String? ?? 'Unknown';
+                    final power =
+                        (d['current_power_w'] as num?)?.toDouble() ?? 0.0;
+                    final color = _donutColors[i % _donutColors.length];
+                    final hKey = 'device:$id:power';
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: color,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              name,
+                              style: const TextStyle(fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          _highlightableValue(
+                            context: context,
+                            highlightKey: hKey,
+                            highlightKeys: highlightKeys,
+                            child: Text(
+                              _formatPower(power),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withOpacity(0.7),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Recommendations ──────────────────────────────────────────────────
+
+  Widget _buildRecommendationsCard(BuildContext context) {
+    if (_recommendations.isEmpty) {
+      return Card(
+        elevation: 2,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Icon(Icons.eco, color: Colors.green, size: 28),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'No recommendations at this time.',
+                  style: TextStyle(fontSize: 15),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Card(
       elevation: 2,
       color: Theme.of(context).colorScheme.secondaryContainer,
@@ -444,62 +2308,39 @@ class DashboardPage extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            _buildSavingsInsight(
-              context,
-              'Reduce AC usage by 2°C',
-              'Save up to \$1.20/day',
-              Icons.ac_unit,
-            ),
-            const Divider(height: 24),
-            _buildSavingsInsight(
-              context,
-              'Schedule water heater to off-peak',
-              'Save up to \$0.80/day',
-              Icons.water_drop,
-            ),
-            const Divider(height: 24),
-            _buildSavingsInsight(
-              context,
-              'Enable smart standby mode',
-              'Save up to \$0.50/day',
-              Icons.power_settings_new,
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.secondary,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            ...List.generate(_recommendations.length, (i) {
+              final rec = _recommendations[i] as Map<String, dynamic>;
+              final title = rec['title'] as String? ?? '';
+              final detail = rec['detail'] as String? ?? '';
+              final severity = rec['severity'] as String? ?? 'low';
+
+              IconData icon;
+              switch (severity) {
+                case 'high':
+                  icon = Icons.warning_amber;
+                  break;
+                case 'medium':
+                  icon = Icons.info_outline;
+                  break;
+                default:
+                  icon = Icons.lightbulb_outline;
+              }
+
+              return Column(
                 children: [
-                  Text(
-                    'Total Potential Savings',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSecondary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    '\$2.50/day',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSecondary,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  if (i > 0) const Divider(height: 24),
+                  _buildRecommendationRow(context, title, detail, icon),
                 ],
-              ),
-            ),
+              );
+            }),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSavingsInsight(
-      BuildContext context, String title, String saving, IconData icon) {
+  Widget _buildRecommendationRow(
+      BuildContext context, String title, String detail, IconData icon) {
     return Row(
       children: [
         Icon(icon,
@@ -519,11 +2360,10 @@ class DashboardPage extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                saving,
+                detail,
                 style: TextStyle(
                   fontSize: 13,
                   color: Theme.of(context).colorScheme.onSecondaryContainer,
-                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
@@ -535,58 +2375,128 @@ class DashboardPage extends StatelessWidget {
     );
   }
 
-  Widget _buildDeviceUsageList(BuildContext context) {
+  // ── Real-Time Device Usage ───────────────────────────────────────────
+
+  Widget _buildDeviceUsageList(
+    BuildContext context, {
+    List<dynamic>? devices,
+    Set<String> highlightKeys = const {},
+  }) {
+    final devs = devices ?? _devices;
+    if (devs.isEmpty) {
+      return Card(
+        elevation: 1,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Icon(Icons.devices,
+                  color: Theme.of(context).colorScheme.outline, size: 28),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'No devices registered.',
+                  style: TextStyle(fontSize: 15),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Find selected device map (or null)
+    Map<String, dynamic>? selected;
+    if (_selectedDeviceId != null) {
+      for (final d in devs) {
+        final map = d as Map<String, dynamic>;
+        if (map['device_id'] == _selectedDeviceId) {
+          selected = map;
+          break;
+        }
+      }
+    }
+
     return Column(
       children: [
-        _buildDeviceUsageItem(
-          context,
-          'Air Conditioner',
-          '2.8 kW',
-          Icons.ac_unit,
-          Colors.blue,
-          0.75,
-          'High',
+        // Dropdown selector
+        Card(
+          elevation: 2,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _selectedDeviceId,
+                isExpanded: true,
+                hint: const Text('Select a device'),
+                icon: const Icon(Icons.arrow_drop_down),
+                items: devs.map<DropdownMenuItem<String>>((d) {
+                  final map = d as Map<String, dynamic>;
+                  final id = map['device_id'] as String? ?? '';
+                  final name = map['device_name'] as String? ?? 'Unknown';
+                  final type = map['device_type'] as String? ?? '';
+                  final status = map['status'] as String? ?? 'Off';
+                  return DropdownMenuItem<String>(
+                    value: id,
+                    child: Row(
+                      children: [
+                        Icon(_deviceIcon(type),
+                            color: _deviceColor(type), size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(name, overflow: TextOverflow.ellipsis),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _statusColor(status).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            status,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: _statusColor(status),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedDeviceId = value;
+                  });
+                },
+              ),
+            ),
+          ),
         ),
-        const SizedBox(height: 12),
-        _buildDeviceUsageItem(
-          context,
-          'Water Heater',
-          '1.5 kW',
-          Icons.water_drop,
-          Colors.orange,
-          0.45,
-          'Medium',
-        ),
-        const SizedBox(height: 12),
-        _buildDeviceUsageItem(
-          context,
-          'Refrigerator',
-          '0.6 kW',
-          Icons.kitchen,
-          Colors.green,
-          0.25,
-          'Normal',
-        ),
-        const SizedBox(height: 12),
-        _buildDeviceUsageItem(
-          context,
-          'Washing Machine',
-          '0.4 kW',
-          Icons.local_laundry_service,
-          Colors.teal,
-          0.15,
-          'Low',
-        ),
-        const SizedBox(height: 12),
-        _buildDeviceUsageItem(
-          context,
-          'Lighting',
-          '0.3 kW',
-          Icons.lightbulb,
-          Colors.amber,
-          0.10,
-          'Low',
-        ),
+
+        // Selected device detail card
+        if (selected != null) ...[
+          const SizedBox(height: 12),
+          _highlightableValue(
+            context: context,
+            highlightKey: 'device:${selected['device_id']}:power',
+            highlightKeys: highlightKeys,
+            child: _buildDeviceUsageItem(
+              context,
+              selected['device_name'] as String? ?? 'Unknown',
+              _formatPower(
+                  (selected['current_power_w'] as num?)?.toDouble() ?? 0.0),
+              _deviceIcon(selected['device_type'] as String? ?? ''),
+              _deviceColor(selected['device_type'] as String? ?? ''),
+              (selected['usage_percentage'] as num?)?.toDouble() ?? 0.0,
+              selected['status'] as String? ?? 'Off',
+              selected['rated_power_watts'] as int? ?? 0,
+              selected['location'] as String? ?? '',
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -599,6 +2509,8 @@ class DashboardPage extends StatelessWidget {
     Color color,
     double percentage,
     String status,
+    int ratedWatts,
+    String location,
   ) {
     return Card(
       elevation: 1,
@@ -646,14 +2558,14 @@ class DashboardPage extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _getStatusColor(status).withOpacity(0.1),
+                    color: _statusColor(status).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
                     status,
                     style: TextStyle(
                       fontSize: 12,
-                      color: _getStatusColor(status),
+                      color: _statusColor(status),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -671,28 +2583,97 @@ class DashboardPage extends StatelessWidget {
                 valueColor: AlwaysStoppedAnimation<Color>(color),
               ),
             ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildDeviceDetailChip(context, Icons.speed, 'Rated',
+                    _formatPower(ratedWatts.toDouble())),
+                _buildDeviceDetailChip(
+                    context, Icons.location_on, 'Location', location),
+                _buildDeviceDetailChip(context, Icons.pie_chart, 'Usage',
+                    '${(percentage * 100).toStringAsFixed(0)}%'),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
 
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'High':
-        return Colors.red;
-      case 'Medium':
-        return Colors.orange;
-      case 'Normal':
-        return Colors.green;
-      case 'Low':
-        return Colors.blue;
-      default:
-        return Colors.grey;
-    }
+  Widget _buildDeviceDetailChip(
+      BuildContext context, IconData icon, String label, String value) {
+    return Column(
+      children: [
+        Icon(icon,
+            size: 16,
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5)),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+          ),
+        ),
+      ],
+    );
   }
 
-  Widget _buildDeviceBehaviorCard(BuildContext context) {
+  // ── Device Behavior Comparison ───────────────────────────────────────
+
+  Widget _buildDeviceBehaviorCard(
+    BuildContext context, {
+    Map<String, dynamic>? topDevice,
+    Set<String> highlightKeys = const {},
+  }) {
+    final top = topDevice ?? _topDevice;
+    if (top == null) {
+      final hasDevices = _devices.isNotEmpty;
+      return Card(
+        elevation: 2,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Icon(Icons.compare_arrows,
+                  color: Theme.of(context).colorScheme.outline, size: 28),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  hasDevices
+                      ? 'Device behavior comparison will appear here when devices report usage. Data is from your connected devices.'
+                      : 'Add devices and assign modules to see rated vs current power comparison.',
+                  style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withOpacity(0.7)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final deviceName = top['device_name'] as String? ?? 'Device';
+    final ratedW = (top['rated_power_w'] as num?)?.toDouble() ?? 0.0;
+    final currentW = (top['current_power_w'] as num?)?.toDouble() ?? 0.0;
+    final diffPct = (top['difference_percent'] as num?)?.toDouble() ?? 0.0;
+
+    final isOverCapacity = currentW > ratedW;
+    final diffColor = isOverCapacity ? Colors.red : Colors.green;
+    final diffIcon = isOverCapacity ? Icons.warning : Icons.check_circle;
+    final infoText = isOverCapacity
+        ? 'Device consuming ${diffPct.toStringAsFixed(0)}% of rated capacity. Check for issues.'
+        : 'Device operating at ${diffPct.toStringAsFixed(0)}% of rated capacity.';
+
     return Card(
       elevation: 2,
       child: Padding(
@@ -700,9 +2681,9 @@ class DashboardPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Air Conditioner Usage Pattern',
-              style: TextStyle(
+            Text(
+              '$deviceName Usage Pattern',
+              style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
@@ -713,8 +2694,8 @@ class DashboardPage extends StatelessWidget {
               children: [
                 _buildBehaviorColumn(
                   context,
-                  'Normal',
-                  '2.2 kWh',
+                  'Rated',
+                  _formatPower(ratedW),
                   Colors.green,
                   Icons.check_circle,
                 ),
@@ -723,12 +2704,17 @@ class DashboardPage extends StatelessWidget {
                   width: 1,
                   color: Theme.of(context).colorScheme.outlineVariant,
                 ),
-                _buildBehaviorColumn(
-                  context,
-                  'Current',
-                  '3.2 kWh',
-                  Colors.red,
-                  Icons.trending_up,
+                _highlightableValue(
+                  context: context,
+                  highlightKey: 'top_anomaly_device',
+                  highlightKeys: highlightKeys,
+                  child: _buildBehaviorColumn(
+                    context,
+                    'Current',
+                    _formatPower(currentW),
+                    isOverCapacity ? Colors.red : Colors.blue,
+                    Icons.trending_up,
+                  ),
                 ),
                 Container(
                   height: 80,
@@ -737,10 +2723,10 @@ class DashboardPage extends StatelessWidget {
                 ),
                 _buildBehaviorColumn(
                   context,
-                  'Difference',
-                  '+45%',
-                  Colors.orange,
-                  Icons.warning,
+                  'Usage',
+                  '${diffPct.toStringAsFixed(0)}%',
+                  diffColor,
+                  diffIcon,
                 ),
               ],
             ),
@@ -759,7 +2745,7 @@ class DashboardPage extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Device consuming 45% more than usual. Check for issues.',
+                      infoText,
                       style: TextStyle(
                         fontSize: 13,
                         color: Theme.of(context).colorScheme.onPrimaryContainer,

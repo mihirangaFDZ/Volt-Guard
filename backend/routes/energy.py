@@ -189,9 +189,14 @@ def _realtime_anomaly_check(reading_dict: dict):
         else:
             severity = "Low"
 
-        # Look up device name for friendlier description
-        device_info = devices_col.find_one({"module_id": module}) if module else None
-        device_name = device_info["device_name"] if device_info else (location or module or "Unknown")
+        # Resolve device from DB so anomaly is stored with real device_id and device_name
+        device_info = None
+        if module:
+            device_info = devices_col.find_one({"module_id": module}) or devices_col.find_one({"module": module})
+        if not device_info and location:
+            device_info = devices_col.find_one({"location": location})
+        device_name = (device_info.get("device_name") if device_info else None) or (location or module or "Unknown")
+        device_id = (device_info.get("device_id") if device_info else None) or (location or module or "unknown")
 
         description = (
             f"Abnormal energy usage detected on {device_name}: "
@@ -199,8 +204,9 @@ def _realtime_anomaly_check(reading_dict: dict):
         )
 
         alert_doc = {
-            "device_id": device_info["device_id"] if device_info else (location or module or "unknown"),
+            "device_id": device_id,
             "device_name": device_name,
+            "device_type": (device_info.get("device_type") if device_info else None) or "",
             "anomaly_type": "energy_consumption",
             "severity": severity,
             "description": description,
