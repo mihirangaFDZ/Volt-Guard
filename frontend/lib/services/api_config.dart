@@ -7,7 +7,7 @@ class ApiConfig {
   // Base URL for the API
   // Change this to your backend server URL
   static const String baseUrl = 'http://10.0.2.2:8000';
-  
+
   // API version prefix
   static const String apiVersion = '/api/v1';
 
@@ -31,7 +31,9 @@ class ApiConfig {
 
   static const String optimizationEndpoint = '/optimization';
 
-  
+  static const String chatbotEndpoint = '/chatbot';
+  static const String dashboardEndpoint = '/dashboard';
+
   // Request timeout duration
   static const Duration requestTimeout = Duration(seconds: 30);
   // Longer timeout for analytics/optimization (backend may be slow)

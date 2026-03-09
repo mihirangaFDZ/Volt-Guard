@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Optional
-from database import anomaly_col, energy_col, analytics_col
+from database import anomaly_col, energy_col, analytics_col, devices_col
 from app.models.anomaly_model import Anomaly
 from utils.jwt_handler import get_current_user
 import pandas as pd
@@ -52,15 +52,56 @@ def add_anomaly(anomaly: Anomaly):
     anomaly_col.insert_one(doc)
     return {"message": "Anomaly recorded"}
 
+def _resolve_device_for_anomaly(location: Optional[str] = None, module: Optional[str] = None, device_id: Optional[str] = None) -> dict:
+    """Resolve device_id, device_name, device_type from devices collection by location, module, or device_id."""
+    device = None
+    if device_id:
+        device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
+    if not device and module:
+        device = devices_col.find_one({"module_id": module}) or devices_col.find_one({"module": module})
+    if not device and location:
+        device = devices_col.find_one({"location": location})
+    if not device:
+        return {
+            "device_id": device_id or location or module or "unknown",
+            "device_name": location or module or "Unknown",
+            "device_type": "",
+        }
+    return {
+        "device_id": device.get("device_id", device_id or "unknown"),
+        "device_name": device.get("device_name", "Unknown"),
+        "device_type": device.get("device_type", ""),
+    }
+
+
+def _enrich_anomaly_with_device(doc: dict) -> dict:
+    """Add device_name and device_type from devices collection for display; resolve by device_id, then location, then module."""
+    out = dict(doc)
+    device = devices_col.find_one({"device_id": doc.get("device_id")}, {"_id": 0})
+    if not device and doc.get("location"):
+        device = devices_col.find_one({"location": doc["location"]})
+    if not device and doc.get("module"):
+        device = devices_col.find_one({"module_id": doc["module"]}) or devices_col.find_one({"module": doc["module"]})
+    out["device_name"] = (device.get("device_name") if device else None) or doc.get("device_name") or "Unknown"
+    out["device_type"] = (device.get("device_type") if device else None) or doc.get("device_type") or ""
+    if isinstance(out.get("detected_at"), datetime):
+        out["detected_at"] = out["detected_at"].isoformat()
+    return out
+
+
 @router.get("/active")
 def get_active_anomalies(
     severity: Optional[str] = Query(None, description="Filter by severity: High, Medium, Low"),
     limit: int = Query(50, ge=1, le=200),
     hours_back: int = Query(168, ge=1, le=720, description="How many hours back to look"),
 ):
-    """Get recent anomaly alerts (auto-detected and manual)."""
+    """Get recent anomaly alerts from DB (auto-detected from energy readings and manual). Enriched with device_name/device_type."""
     cutoff = datetime.utcnow() - timedelta(hours=hours_back)
-    query = {"detected_at": {"$gte": cutoff.isoformat()}}
+    cutoff_str = cutoff.isoformat()
+    query = {"$or": [
+        {"detected_at": {"$gte": cutoff_str}},
+        {"detected_at": {"$gte": cutoff}},
+    ]}
     if severity:
         query["severity"] = severity
 
@@ -70,7 +111,7 @@ def get_active_anomalies(
         .sort("detected_at", -1)
         .limit(limit)
     )
-    return results
+    return [_enrich_anomaly_with_device(r) for r in results]
 
 @router.get("/recent-alerts")
 def get_recent_alerts(
@@ -174,15 +215,12 @@ def detect_anomalies(
     method: str = Query("isolation_forest", description="Detection method: isolation_forest, autoencoder, or both")
 ):
     """
-    Detect anomalies in recent energy data
-
-    Supports two detection methods:
-    - isolation_forest: Statistical isolation-based detection
-    - autoencoder: Neural network reconstruction error detection
-    - both: Run both methods and combine results
+    Detect anomalies from real energy readings in MongoDB only (no dummy data).
+    Reads from energy_readings collection, runs ML detection, and saves detected
+    anomalies to the anomalies table with real device_id, device_name, power values.
     """
     try:
-        # Extract and prepare data
+        # Real data only: from MongoDB energy_readings
         energy_df = extract_energy_readings(hours_back=hours_back)
         occupancy_df = extract_occupancy_telemetry(hours_back=hours_back)
 
@@ -223,8 +261,13 @@ def detect_anomalies(
                 if_anomalies = if_anomalies.sort_values('anomaly_score', ascending=False)
 
                 for _, row in if_anomalies.head(100).iterrows():
+                    loc = row.get('location') or 'unknown'
+                    mod = row.get('module') if 'module' in row else None
+                    dev = _resolve_device_for_anomaly(location=loc, module=mod)
                     anomaly_doc = {
-                        "device_id": row.get('location', 'unknown'),
+                        "device_id": dev["device_id"],
+                        "device_name": dev["device_name"],
+                        "device_type": dev["device_type"],
                         "anomaly_type": "energy_consumption",
                         "severity": "High" if row['anomaly_score'] > 0.7 else "Medium",
                         "description": f"Unusual energy pattern detected: {row.get('power_w', 0):.2f}W",
@@ -232,7 +275,8 @@ def detect_anomalies(
                         "anomaly_score": float(row['anomaly_score']),
                         "power_w": float(row.get('power_w', 0)),
                         "current_a": float(row.get('current_a', 0)),
-                        "location": row.get('location', 'unknown'),
+                        "location": loc,
+                        "module": mod or "",
                         "detection_method": "isolation_forest"
                     }
                     anomalies_list.append(anomaly_doc)
@@ -251,8 +295,13 @@ def detect_anomalies(
                 ae_anomalies = ae_anomalies.sort_values('anomaly_score_ae', ascending=False)
 
                 for _, row in ae_anomalies.head(100).iterrows():
+                    loc = row.get('location') or 'unknown'
+                    mod = row.get('module') if 'module' in row else None
+                    dev = _resolve_device_for_anomaly(location=loc, module=mod)
                     anomaly_doc = {
-                        "device_id": row.get('location', 'unknown'),
+                        "device_id": dev["device_id"],
+                        "device_name": dev["device_name"],
+                        "device_type": dev["device_type"],
                         "anomaly_type": "energy_consumption",
                         "severity": "High" if row['anomaly_score_ae'] > 0.7 else "Medium",
                         "description": f"Abnormal reconstruction pattern: {row.get('power_w', 0):.2f}W (error: {row['reconstruction_error']:.4f})",
@@ -261,7 +310,8 @@ def detect_anomalies(
                         "reconstruction_error": float(row['reconstruction_error']),
                         "power_w": float(row.get('power_w', 0)),
                         "current_a": float(row.get('current_a', 0)),
-                        "location": row.get('location', 'unknown'),
+                        "location": loc,
+                        "module": mod or "",
                         "detection_method": "autoencoder"
                     }
                     anomalies_list.append(anomaly_doc)

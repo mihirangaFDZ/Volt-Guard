@@ -54,30 +54,6 @@ class _HomeShellState extends State<HomeShell> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9F9),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        title: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.bolt, color: Color(0xFF00C853)),
-            SizedBox(width: 8),
-            Text(
-              'Volt Guard',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.account_circle_outlined),
-            color: Colors.black87,
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
       body: SafeArea(
         child: IndexedStack(
           index: _currentIndex,

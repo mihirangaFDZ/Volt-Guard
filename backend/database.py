@@ -11,16 +11,17 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=BASE_DIR / '.env')
 
 # Configure MongoDB client with proper timeout and DNS settings
+# Increased timeouts to avoid NetworkTimeout on slow/latent connections (e.g. Atlas over internet)
 client = MongoClient(
     os.getenv("MONGO_URI"),
     server_api=ServerApi('1'),
-    serverSelectionTimeoutMS=5000,  # 5 second timeout
-    connectTimeoutMS=10000,  # 10 second connection timeout
-    socketTimeoutMS=10000,   # 10 second socket timeout
+    serverSelectionTimeoutMS=20000,  # 20s to select server
+    connectTimeoutMS=20000,          # 20s to connect
+    socketTimeoutMS=30000,           # 30s for read/write operations
     retryWrites=True,
     retryReads=True,
     maxPoolSize=10,
-    minPoolSize=1
+    minPoolSize=1,
 )
 db = client[os.getenv("MONGODB_DB_NAME")]
 
@@ -32,3 +33,5 @@ user_col = db["users"]
 analytics_col = db["occupancy_telemetry"]
 faults_col = db["faults"]
 energy_advice_history_col = db["energy_advice_history"]
+chatbot_custom_qa_col = db["chatbot_custom_qa"]
+bills_col = db["bills"]
