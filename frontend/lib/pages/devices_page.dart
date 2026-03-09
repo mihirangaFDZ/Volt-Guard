@@ -3504,10 +3504,28 @@ class _DevicesPageState extends State<DevicesPage> {
     );
   }
 
+  /// Format hour (0-24) as AM/PM (e.g., 6 -> "6:00 AM", 18 -> "6:00 PM").
+  String _formatHourAmPm(int hour24) {
+    if (hour24 == 0 || hour24 == 24) return '12:00 AM';
+    if (hour24 == 12) return '12:00 PM';
+    if (hour24 < 12) return '$hour24:00 AM';
+    return '${hour24 - 12}:00 PM';
+  }
+
+  /// Format date as day/month (e.g., "Mar 9", "Mar 10").
+  String _formatDayMonth(DateTime date) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${months[date.month - 1]} ${date.day}';
+  }
+
   Widget _buildSparkline(List<EnergyReading> readings, TimeRange timeRange) {
     if (readings.isEmpty) return const SizedBox.shrink();
 
     final bool is7Days = timeRange == TimeRange.days7;
+    final bool is6Hours = timeRange == TimeRange.hours6;
     final List<FlSpot> spots;
     final double minX;
     final double maxX;
@@ -3516,10 +3534,15 @@ class _DevicesPageState extends State<DevicesPage> {
 
     if (is7Days) {
       // Aggregate by day index (0..6): X = day, Y = average current (A)
+      // Anchor to END (newest) so latest readings appear at right edge
       final sorted = List<EnergyReading>.from(readings)
         ..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
-      final startDate = sorted.first.receivedAt.toLocal();
-      final startDay = DateTime(startDate.year, startDate.month, startDate.day);
+      final endDate = sorted.last.receivedAt.toLocal();
+      final startDay = DateTime(
+        endDate.year,
+        endDate.month,
+        endDate.day,
+      ).subtract(const Duration(days: 6));
 
       final daySums = <int, double>{};
       final dayCounts = <int, int>{};
@@ -3543,20 +3566,68 @@ class _DevicesPageState extends State<DevicesPage> {
       minX = 0;
       maxX = 6;
       verticalInterval = 1;
-      bottomLabel = (v) => 'Day ${v + 1}';
+      bottomLabel = (v) => _formatDayMonth(startDay.add(Duration(days: v)));
+    } else if (is6Hours) {
+      // 6h: Aggregate by actual hour in the time window (0..6)
+      // Anchor to END (newest) so latest readings appear at right edge
+      final sorted = List<EnergyReading>.from(readings)
+        ..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
+      final endDate = sorted.last.receivedAt.toLocal();
+      final startHour = DateTime(
+        endDate.year, endDate.month, endDate.day, endDate.hour,
+      ).subtract(const Duration(hours: 6));
+
+      final hourSums = <int, double>{};
+      final hourCounts = <int, int>{};
+      for (int h = 0; h <= 6; h++) {
+        hourSums[h] = 0.0;
+        hourCounts[h] = 0;
+      }
+      for (final r in sorted) {
+        final local = r.receivedAt.toLocal();
+        final readingHour = DateTime(
+          local.year, local.month, local.day, local.hour,
+        );
+        final hourIndex = readingHour.difference(startHour).inHours.clamp(0, 6);
+        hourSums[hourIndex] = (hourSums[hourIndex] ?? 0) + r.currentA;
+        hourCounts[hourIndex] = (hourCounts[hourIndex] ?? 0) + 1;
+      }
+      spots = [];
+      for (int h = 0; h <= 6; h++) {
+        final count = hourCounts[h] ?? 0;
+        final avg = count > 0 ? (hourSums[h]! / count) : 0.0;
+        spots.add(FlSpot(h.toDouble(), avg));
+      }
+      minX = 0;
+      maxX = 6;
+      verticalInterval = 1;
+      bottomLabel = (v) => _formatHourAmPm(
+        startHour.add(Duration(hours: v)).hour,
+      );
     } else {
-      // Aggregate by hour of day (0-23): X = time of day, Y = average current (A)
+      // 24h: Aggregate by actual hour in the time window (0..23)
+      // Anchor to END (newest) so latest readings appear at right edge
+      final sorted = List<EnergyReading>.from(readings)
+        ..sort((a, b) => a.receivedAt.compareTo(b.receivedAt));
+      final endDate = sorted.last.receivedAt.toLocal();
+      final startHour = DateTime(
+        endDate.year, endDate.month, endDate.day, endDate.hour,
+      ).subtract(const Duration(hours: 23));
+
       final hourSums = <int, double>{};
       final hourCounts = <int, int>{};
       for (int h = 0; h < 24; h++) {
         hourSums[h] = 0.0;
         hourCounts[h] = 0;
       }
-      for (final r in readings) {
+      for (final r in sorted) {
         final local = r.receivedAt.toLocal();
-        final hour = local.hour;
-        hourSums[hour] = (hourSums[hour] ?? 0) + r.currentA;
-        hourCounts[hour] = (hourCounts[hour] ?? 0) + 1;
+        final readingHour = DateTime(
+          local.year, local.month, local.day, local.hour,
+        );
+        final hourIndex = readingHour.difference(startHour).inHours.clamp(0, 23);
+        hourSums[hourIndex] = (hourSums[hourIndex] ?? 0) + r.currentA;
+        hourCounts[hourIndex] = (hourCounts[hourIndex] ?? 0) + 1;
       }
       spots = [];
       for (int h = 0; h < 24; h++) {
@@ -3567,7 +3638,9 @@ class _DevicesPageState extends State<DevicesPage> {
       minX = 0;
       maxX = 24;
       verticalInterval = 6;
-      bottomLabel = (v) => v == 24 ? '24:00' : '${v.toString().padLeft(2, '0')}:00';
+      bottomLabel = (v) => _formatHourAmPm(
+        startHour.add(Duration(hours: v)).hour,
+      );
     }
 
     final maxCurrent = spots.isEmpty
@@ -3623,7 +3696,7 @@ class _DevicesPageState extends State<DevicesPage> {
                 reservedSize: 24,
                 interval: verticalInterval,
                 getTitlesWidget: (value, meta) {
-                  final v = value.round().clamp(0, is7Days ? 6 : 24);
+                  final v = value.round().clamp(minX.round(), maxX.round());
                   return Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Text(
