@@ -7,6 +7,7 @@ class Device(BaseModel):
     device_type: str
     location: str
     rated_power_watts: int
+    user_id: Optional[str] = None
     module_id: Optional[str] = None  # Reference to module in energy_readings
     installed_date: Optional[str] = None
     relay_state: Optional[str] = "OFF"  # "ON" or "OFF"
