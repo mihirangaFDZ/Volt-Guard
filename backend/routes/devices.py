@@ -8,8 +8,8 @@ from utils.jwt_handler import get_current_user
 router = APIRouter(prefix="/devices", tags=["Devices"])
 
 
-@router.post("/", dependencies=[Depends(get_current_user)])
-def add_device(device: Device):
+@router.post("/")
+def add_device(device: Device, current_user: dict = Depends(get_current_user)):
     # Validate module_id exists in energy_readings if provided
     if device.module_id:
         module_exists = energy_col.find_one({"module": device.module_id})
@@ -19,30 +19,45 @@ def add_device(device: Device):
                 detail=f"Module {device.module_id} is in use by another device."
             )
     
-    devices_col.insert_one(device.dict())
+    device_payload = device.dict()
+    # Always bind devices to the authenticated user.
+    device_payload["user_id"] = current_user["user_id"]
+    devices_col.insert_one(device_payload)
     return {"message": "Device added successfully"}
 
 
-@router.get("/", dependencies=[Depends(get_current_user)])
-def get_devices(location: Optional[str] = Query(None, description="Filter devices by location")):
-    query = {"location": location} if location else {}
+@router.get("/")
+def get_devices(
+    location: Optional[str] = Query(None, description="Filter devices by location"),
+    current_user: dict = Depends(get_current_user),
+):
+    query = {"user_id": current_user["user_id"]}
+    if location:
+        query["location"] = location
     return list(devices_col.find(query, {"_id": 0}))
 
-@router.get("/{device_id}", dependencies=[Depends(get_current_user)])
-def get_device(device_id: str):
-    return devices_col.find_one({"device_id": device_id}, {"_id": 0})
+@router.get("/{device_id}")
+def get_device(device_id: str, current_user: dict = Depends(get_current_user)):
+    return devices_col.find_one(
+        {"device_id": device_id, "user_id": current_user["user_id"]},
+        {"_id": 0},
+    )
 
 @router.get("/{device_id}/energy-readings")
 def get_device_energy_readings(
     device_id: str, 
     limit: int = Query(1000, ge=1, le=10000),
-    hours: Optional[int] = Query(None, ge=1, le=168)
+    hours: Optional[int] = Query(None, ge=1, le=168),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Get energy readings for a device through module_id relationship.
     Optionally filter by time range (hours parameter).
     """
-    device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
+    device = devices_col.find_one(
+        {"device_id": device_id, "user_id": current_user["user_id"]},
+        {"_id": 0},
+    )
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
@@ -74,12 +89,16 @@ def get_device_energy_readings(
         "count": len(readings)
     }
 
-@router.put("/{device_id}/module", dependencies=[Depends(get_current_user)])
-def update_device_module(device_id: str, module_id: str):
+@router.put("/{device_id}/module")
+def update_device_module(
+    device_id: str, module_id: str, current_user: dict = Depends(get_current_user)
+):
     """
     Update or assign module_id to a device
     """
-    device = devices_col.find_one({"device_id": device_id})
+    device = devices_col.find_one(
+        {"device_id": device_id, "user_id": current_user["user_id"]}
+    )
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
@@ -92,20 +111,22 @@ def update_device_module(device_id: str, module_id: str):
         )
     
     devices_col.update_one(
-        {"device_id": device_id},
+        {"device_id": device_id, "user_id": current_user["user_id"]},
         {"$set": {"module_id": module_id}}
     )
     
     return {"message": f"Module {module_id} assigned to device {device_id}"}
 
-@router.delete("/{device_id}", dependencies=[Depends(get_current_user)])
-def delete_device(device_id: str):
-    devices_col.delete_one({"device_id": device_id})
+@router.delete("/{device_id}")
+def delete_device(device_id: str, current_user: dict = Depends(get_current_user)):
+    devices_col.delete_one({"device_id": device_id, "user_id": current_user["user_id"]})
     return {"message": "Device removed"}
 
 
-@router.put("/{device_id}/relay", dependencies=[Depends(get_current_user)])
-def update_relay_state(device_id: str, payload: RelayStateUpdate):
+@router.put("/{device_id}/relay")
+def update_relay_state(
+    device_id: str, payload: RelayStateUpdate, current_user: dict = Depends(get_current_user)
+):
     """
     Update the desired relay state for a device.
     Called by the Flutter app when user toggles the switch.
@@ -113,12 +134,14 @@ def update_relay_state(device_id: str, payload: RelayStateUpdate):
     if payload.relay_state not in ("ON", "OFF"):
         raise HTTPException(status_code=400, detail="relay_state must be 'ON' or 'OFF'")
 
-    device = devices_col.find_one({"device_id": device_id})
+    device = devices_col.find_one(
+        {"device_id": device_id, "user_id": current_user["user_id"]}
+    )
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
     devices_col.update_one(
-        {"device_id": device_id},
+        {"device_id": device_id, "user_id": current_user["user_id"]},
         {"$set": {"relay_state": payload.relay_state}}
     )
 
@@ -129,12 +152,15 @@ def update_relay_state(device_id: str, payload: RelayStateUpdate):
     }
 
 
-@router.get("/{device_id}/relay", dependencies=[Depends(get_current_user)])
-def get_relay_state(device_id: str):
+@router.get("/{device_id}/relay")
+def get_relay_state(device_id: str, current_user: dict = Depends(get_current_user)):
     """
     Get the current desired relay state for a device.
     """
-    device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
+    device = devices_col.find_one(
+        {"device_id": device_id, "user_id": current_user["user_id"]},
+        {"_id": 0},
+    )
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
@@ -155,13 +181,16 @@ ANOMALY_SHUTOFF_WINDOW_MINUTES = 10
 
 
 @router.post("/{device_id}/check-anomaly-shutoff")
-def check_anomaly_shutoff(device_id: str):
+def check_anomaly_shutoff(device_id: str, current_user: dict = Depends(get_current_user)):
     """
     If the model has detected abnormal power consumption (High severity, score >= 0.6)
     for this device in the last 10 minutes, turn the relay OFF to protect the circuit.
     Returns whether auto-shutoff was performed. Does nothing if no anomaly or relay already OFF.
     """
-    device = devices_col.find_one({"device_id": device_id}, {"_id": 0})
+    device = devices_col.find_one(
+        {"device_id": device_id, "user_id": current_user["user_id"]},
+        {"_id": 0},
+    )
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
@@ -193,7 +222,7 @@ def check_anomaly_shutoff(device_id: str):
         score = doc.get("anomaly_score") or 0
         if score >= ANOMALY_SHUTOFF_MIN_SCORE:
             devices_col.update_one(
-                {"device_id": device_id},
+                {"device_id": device_id, "user_id": current_user["user_id"]},
                 {"$set": {"relay_state": "OFF"}},
             )
             return {

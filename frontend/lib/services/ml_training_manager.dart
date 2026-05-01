@@ -2,8 +2,7 @@ import 'dart:async';
 
 import 'ml_training_service.dart';
 
-/// Singleton manager that ensures ML model training is triggered exactly once
-/// at app startup and caches the training state globally.
+/// Singleton manager that caches ML model readiness from status checks.
 ///
 /// Usage:
 ///   await MLTrainingManager.instance.ensureModelTrained();
@@ -23,9 +22,8 @@ class MLTrainingManager {
   bool get isModelReady => _isModelReady;
   String? get trainingError => _trainingError;
 
-  /// Trigger model training once. Subsequent calls are no-ops.
-  /// Returns immediately after firing the training request — it runs
-  /// in the background on the server.
+  /// Fetch model status once and cache readiness.
+  /// This does not auto-trigger training.
   Future<void> ensureModelTrained() async {
     if (_hasTriggeredTraining) {
       // Already triggered — wait for the in-flight request if still going.
@@ -39,32 +37,16 @@ class MLTrainingManager {
     _trainingCompleter = Completer<void>();
 
     try {
-      // First check if models are already trained
       final status = await _service.fetchStatus();
-      final isAlreadyTraining = status['is_training'] == true;
+      _isTraining = status['is_training'] == true;
 
-      if (!isAlreadyTraining && status['last_training'] != null) {
-        // Models have been trained before — mark as ready
-        _isModelReady = true;
-        _trainingCompleter!.complete();
-        return;
-      }
+      final models = status['models'] as Map<String, dynamic>?;
+      final lstm = models?['prediction_lstm'] as Map<String, dynamic>?;
+      final isLoaded = lstm?['loaded'] == true;
+      final isTrained = lstm?['trained'] == true;
+      _isModelReady = isLoaded || isTrained;
 
-      if (isAlreadyTraining) {
-        // Training is already in progress on the server
-        _isTraining = true;
-        _isModelReady = false;
-        _trainingCompleter!.complete();
-        return;
-      }
-
-      // No previous training — start training
-      _isTraining = true;
-      _trainingError = null;
-      await _service.startTraining();
-      // Training runs asynchronously on the server.
-      // The model will become ready once the server finishes.
-      _isModelReady = false;
+      _trainingError = status['training_error'] as String?;
       _trainingCompleter!.complete();
     } catch (e) {
       _trainingError = e.toString();
@@ -80,9 +62,9 @@ class MLTrainingManager {
     try {
       final status = await _service.fetchStatus();
       _isTraining = status['is_training'] == true;
-      if (!_isTraining && status['last_training'] != null) {
-        _isModelReady = true;
-      }
+      final models = status['models'] as Map<String, dynamic>?;
+      final lstm = models?['prediction_lstm'] as Map<String, dynamic>?;
+      _isModelReady = lstm?['loaded'] == true || lstm?['trained'] == true;
       _trainingError = status['training_error'] as String?;
     } catch (e) {
       _trainingError = e.toString();

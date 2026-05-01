@@ -166,7 +166,7 @@ class _DevicesPageState extends State<DevicesPage> {
       if (!manager.isModelReady) {
         if (!mounted) return;
         setState(() {
-          _forecastError = 'Model not ready. Pull to refresh to retry.';
+          _forecastError = 'Model not available on server. Pull to refresh to retry.';
           _forecastLoading = false;
         });
         return;
@@ -230,7 +230,7 @@ class _DevicesPageState extends State<DevicesPage> {
       if (!manager.isModelReady) {
         if (!mounted) return;
         setState(() {
-          _comparisonError = 'Model not ready. Pull to refresh to retry.';
+          _comparisonError = 'Model not available on server. Pull to refresh to retry.';
           _comparisonLoading = false;
         });
         return;
@@ -258,7 +258,7 @@ class _DevicesPageState extends State<DevicesPage> {
       if (!mounted) return;
       String msg = e.toString();
       if (msg.contains('503')) {
-        msg = 'LSTM model not trained yet. Pull to refresh after training completes.';
+        msg = 'Model not available on server. Pull to refresh to retry.';
       } else if (msg.contains('TimeoutException') ||
           msg.contains('timed out')) {
         msg = 'Comparison request timed out. Try refreshing.';

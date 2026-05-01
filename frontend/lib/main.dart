@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:volt_guard/pages/main_page.dart';
 import 'package:volt_guard/providers/theme_provider.dart';
 import 'package:volt_guard/screens/login_screen.dart';
+import 'package:volt_guard/services/auth_service.dart';
 import 'package:volt_guard/theme/app_theme.dart';
 
 void main() {
@@ -27,7 +29,28 @@ class VoltGuardApp extends StatelessWidget {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
-      home: const LoginScreen(),
+      home: const AuthGate(),
+    );
+  }
+}
+
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: AuthService().isLoggedIn(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final isLoggedIn = snapshot.data ?? false;
+        return isLoggedIn ? const MainPage() : const LoginScreen();
+      },
     );
   }
 }
