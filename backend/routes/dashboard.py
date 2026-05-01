@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Query
@@ -90,19 +90,36 @@ def _parse_ts(raw) -> Optional[datetime]:
     if raw is None:
         return None
     if isinstance(raw, datetime):
+        # Normalize to UTC naive datetime to keep comparisons consistent
+        if raw.tzinfo is not None:
+            try:
+                return raw.astimezone(timezone.utc).replace(tzinfo=None)
+            except Exception:
+                return raw.replace(tzinfo=None)
         return raw
     if isinstance(raw, str):
         try:
-            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed
         except Exception:
             return None
     if isinstance(raw, dict) and "$date" in raw:
         d = raw["$date"]
         if isinstance(d, datetime):
+            if d.tzinfo is not None:
+                try:
+                    return d.astimezone(timezone.utc).replace(tzinfo=None)
+                except Exception:
+                    return d.replace(tzinfo=None)
             return d
         if isinstance(d, str):
             try:
-                return datetime.fromisoformat(d.replace("Z", "+00:00"))
+                parsed = datetime.fromisoformat(d.replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                return parsed
             except Exception:
                 return None
     if isinstance(raw, (int, float)):

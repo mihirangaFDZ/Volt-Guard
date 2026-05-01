@@ -28,8 +28,8 @@ class _MainPageState extends State<MainPage> {
   @override
   void initState() {
     super.initState();
-    // Trigger ML model training once at app startup.
-    // The singleton ensures this only fires once, even if MainPage is rebuilt.
+    // Fetch ML model readiness once at app startup.
+    // This does not auto-trigger training.
     MLTrainingManager.instance.ensureModelTrained();
   }
 
